@@ -1,5 +1,5 @@
 const MECHANICS=["GIL","AMAURI","SAMUEL","TIAGUINHO","TIAGO"];
-const SUPABASE_URL="https://faujgnzagnktsmxbnmmx.supabase.co/rest/v1/";
+const SUPABASE_URL="https://faujgnzagnktsmxbnmmx.supabase.co";
 const SUPABASE_KEY="sb_publishable_BQVeY4ChsN9Vr1JzwXpcOw_RWALGfvj";
 let db=null,state={current:0,counts:{GIL:0,AMAURI:0,SAMUEL:0,TIAGUINHO:0,TIAGO:0},available:{GIL:true,AMAURI:true,SAMUEL:true,TIAGUINHO:true,TIAGO:true},history:[]},channel=null;
 
