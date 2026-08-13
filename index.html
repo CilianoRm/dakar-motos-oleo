@@ -1,86 +1,55 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <title>Dakar Motos — Controle de Troca de Óleo</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Dakar Motos — Controle de Troca de Óleo</title>
+<link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <div class="app">
-    <header>
-      <div class="brand">
-        <img src="logo-dakar.jpg" alt="Dakar Motos">
-      </div>
-      <div class="header-title">CONTROLE DE TROCA DE ÓLEO</div>
-      <div class="clock" id="clock"></div>
-    </header>
+<body><div class="app">
+<header><div class="brand"><img src="logo-dakar.jpg" alt="Dakar Motos"></div><div class="header-title">CONTROLE DE TROCA DE ÓLEO</div><div class="clock" id="clock"></div></header>
 
-    <main id="controlView" class="control-view">
-      <aside class="left-column">
-        <section class="card">
-          <div class="section-title">ORDEM DA SEQUÊNCIA <button id="resetTurn" class="icon-btn" title="Voltar para Gil">↻</button></div>
-          <div id="sequence"></div>
-        </section>
-        <section class="card help">
-          <div class="section-title">COMO FUNCIONA</div>
-          <p>• A sequência começa sempre pelo <b>Gil</b>.</p>
-          <p>• Após cada ação, passa para o próximo mecânico.</p>
-          <p>• <b>Ocupado</b> registra uma pendência de <b>-1</b>.</p>
-          <p>• A TV pode mostrar o painel em outra aba.</p>
-        </section>
-      </aside>
+<main id="controlView" class="control-view">
+<aside class="left-column">
+<section class="card"><div class="section-title">ORDEM DA SEQUÊNCIA <button id="resetTurn" class="icon-btn" title="Voltar para Gil">↻</button></div><div id="sequence"></div></section>
+<section class="card help"><div class="section-title">COMO FUNCIONA</div>
+<p>• A sequência padrão é <b>Gil → Amauri → Samuel → Tiaguinho → Tiago</b>.</p>
+<p>• Você pode escolher manualmente quem será o próximo.</p>
+<p>• Mecânicos marcados como ocupados ficam fora da seleção automática.</p>
+<p>• Às 18:00, o dia é encerrado e os contadores voltam para zero.</p></section>
+</aside>
 
-      <section class="card main-card">
-        <div class="section-title center">DE QUEM É A VEZ?</div>
-        <div class="current-name" id="currentName">GIL</div>
-        <div class="current-sub">É A SUA VEZ</div>
+<section class="card main-card">
+<div class="section-title center">DE QUEM É A VEZ?</div>
+<div class="current-name" id="currentName">GIL</div><div class="current-sub">É A SUA VEZ</div>
 
-        <div class="divider"></div>
-        <div class="section-title center small">REGISTRAR AÇÃO</div>
+<div class="divider"></div><div class="section-title center small">REGISTRAR AÇÃO</div>
+<div class="actions">
+<button class="action oil" id="oilBtn"><span class="action-label">TROCOU ÓLEO</span></button>
+<button class="action busy" id="busyBtn"><span class="action-label">OCUPADO</span></button>
+</div>
 
-        <div class="actions">
-          <button class="action oil" id="oilBtn">
-            <span class="action-label">TROCOU ÓLEO</span>
-          </button>
-          <button class="action busy" id="busyBtn">
-            <span class="action-label">OCUPADO</span>
-          </button>
-        </div>
-        <div class="hint">Clique em uma das opções para registrar a ação.</div>
+<div class="manual-select">
+<label for="manualMechanic">ESCOLHER PRÓXIMA TROCA</label>
+<select id="manualMechanic"><option value="">Escolha um mecânico...</option><option>GIL</option><option>AMAURI</option><option>SAMUEL</option><option>TIAGUINHO</option><option>TIAGO</option></select>
+<button class="secondary" id="setManual">DEFINIR PRÓXIMA VEZ</button>
+<button class="secondary" id="autoMode">VOLTAR PARA SEQUÊNCIA AUTOMÁTICA</button>
+</div>
+<div class="hint">As alterações aparecem em tempo real nos demais dispositivos.</div>
+<div class="panel-links"><button class="secondary" id="openPanel">ABRIR PAINEL DA TV</button><button class="secondary" id="copyPanel">COPIAR LINK DO PAINEL</button></div>
+</section>
 
-        <div class="panel-links">
-          <button class="secondary" id="openPanel">ABRIR PAINEL DA TV</button>
-          <button class="secondary" id="copyPanel">COPIAR LINK DO PAINEL</button>
-        </div>
-      </section>
+<aside class="right-column">
+<section class="card"><div class="section-title">STATUS DOS MECÂNICOS</div><div id="mechanics"></div></section>
+<section class="card history-card"><div class="section-title">HISTÓRICO RECENTE</div><div id="history"></div></section>
+<button class="reset-btn" id="clearData">ZERAR CONTADORES</button>
+</aside>
+</main>
 
-      <aside class="right-column">
-        <section class="card">
-          <div class="section-title">PAINEL DE MECÂNICOS</div>
-          <div id="mechanics"></div>
-        </section>
-        <section class="card history-card">
-          <div class="section-title">HISTÓRICO RECENTE</div>
-          <div id="history"></div>
-        </section>
-        <button class="reset-btn" id="clearData">ZERAR CONTADORES</button>
-      </aside>
-    </main>
-
-    <main id="tvView" class="tv-view hidden">
-      <div class="tv-brand"><img src="logo-dakar.jpg" alt="Dakar Motos"></div>
-      <div class="tv-title">CONTROLE DE TROCA DE ÓLEO</div>
-      <div class="tv-label">DE QUEM É A VEZ?</div>
-      <div class="tv-name" id="tvName">GIL</div>
-      <div class="tv-sub">É A SUA VEZ</div>
-      <div class="tv-line"></div>
-      <div class="tv-list" id="tvList"></div>
-      <div class="tv-footer">PAINEL DAKAR MOTOS • Atualização automática</div>
-    </main>
-  </div>
-
-  <div class="toast" id="toast"></div>
-  <script src="app.js"></script>
-</body>
-</html>
+<main id="tvView" class="tv-view hidden">
+<div class="tv-brand"><img src="logo-dakar.jpg" alt="Dakar Motos"></div><div class="tv-title">CONTROLE DE TROCA DE ÓLEO</div>
+<div class="tv-label">DE QUEM É A VEZ?</div><div class="tv-name" id="tvName">GIL</div><div class="tv-sub">É A SUA VEZ</div>
+<div class="tv-line"></div><div class="tv-list" id="tvList"></div><div class="tv-footer">PAINEL DAKAR MOTOS • Atualização automática</div>
+</main></div>
+<div class="toast" id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js"></script>
+</body></html>
