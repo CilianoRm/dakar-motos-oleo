@@ -40,3 +40,9 @@ README.md
 - A TV usa ?painel=1.
 
 Observação: o reset usa pg_cron se a extensão estiver disponível no projeto Supabase. Se a extensão não estiver disponível, o restante do sistema funciona normalmente, mas o reset automático precisará ser configurado pelo agendador disponível no projeto.
+
+
+## ATUALIZAÇÃO V2 — prioridade por quantidade
+Execute `atualizacao.sql` uma vez no SQL Editor do Supabase.
+
+A nova regra é: menor número de trocas entre os disponíveis tem prioridade; empate segue Gil → Amauri → Samuel → Tiaguinho → Tiago. O clique no nome da Ordem de Serviço coloca o mecânico diretamente no painel. O botão OCUPADO abre o corretor para retirar 1 troca de qualquer mecânico.
