@@ -1,17 +1,42 @@
-# DAKAR MOTOS — Controle de Troca de Óleo
+# DAKAR MOTOS — Atualização Supabase + Realtime
 
-Versão corrigida preservando o projeto original.
+## 1. Configurar o banco
+1. Entre no Supabase e abra o projeto.
+2. SQL Editor → New query.
+3. Abra `banco.sql`, copie tudo e cole.
+4. Clique em RUN.
 
-## Novidades
-- Clique diretamente no nome do mecânico na Ordem de Serviço para colocar a vez no painel.
-- Removidos os controles de “Escolher próxima troca” e “Voltar para sequência automática”.
-- Prioridade automática: mecânico disponível com menor quantidade de trocas.
-- Empates respeitam a ordem Gil → Amauri → Samuel → Tiaguinho → Tiago.
-- Mecânicos ocupados ficam fora da prioridade.
-- TROCOU ÓLEO soma +1 e recalcula a próxima prioridade.
-- OCUPADO abre o corretor para escolher um mecânico e retirar -1 troca.
-- Histórico registra as correções.
-- Supabase e painel da TV continuam no mesmo formato.
+O SQL cria as tabelas, permissões, Realtime e a rotina de reset diário.
 
-## Publicação
-Substitua os arquivos do seu repositório pelos arquivos desta pasta. Não é necessário executar novo SQL para essas alterações; o schema existente já possui os campos usados.
+## 2. Pegar URL e chave
+Supabase → Project Settings → API.
+Pegue:
+- Project URL
+- Publishable key
+
+Não use service_role key no navegador.
+
+## 3. Configurar app.js
+Abra `app.js` e altere:
+const SUPABASE_URL="COLE_AQUI_SUA_PROJECT_URL";
+const SUPABASE_KEY="COLE_AQUI_SUA_PUBLISHABLE_KEY";
+
+## 4. GitHub
+Envie para a raiz do repositório:
+index.html
+style.css
+app.js
+logo-dakar.jpg
+banco.sql
+README.md
+
+## 5. Recursos
+- Sincronização em tempo real entre PCs/TV.
+- Seleção manual da próxima troca.
+- Marcar mecânico como disponível/ocupado.
+- Sequência automática pula ocupados quando possível.
+- Histórico compartilhado.
+- Reset diário às 18:00 no horário de Brasília (a rotina SQL agenda 21:00 UTC).
+- A TV usa ?painel=1.
+
+Observação: o reset usa pg_cron se a extensão estiver disponível no projeto Supabase. Se a extensão não estiver disponível, o restante do sistema funciona normalmente, mas o reset automático precisará ser configurado pelo agendador disponível no projeto.
