@@ -695,8 +695,21 @@ function closeAttendanceModal() { $("attendanceModal")?.classList.add("hidden");
 
 function fmtInputTime(value) {
   if (!value) return "";
-  const m = String(value).match(/(?:T|\s)(\d{2}:\d{2})/);
-  return m ? m[1] : String(value).slice(0,5);
+  const text = String(value);
+  // Horário salvo pelo sistema: converte corretamente para o horário de Brasília.
+  if (text.includes("T") && (text.includes("Z") || /[+-]\d{2}:?\d{2}$/.test(text))) {
+    const d = new Date(text);
+    if (!Number.isNaN(d.getTime())) {
+      return new Intl.DateTimeFormat("pt-BR", {
+        timeZone: "America/Fortaleza",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+      }).format(d);
+    }
+  }
+  const m = text.match(/(?:T|\s)(\d{2}:\d{2})/);
+  return m ? m[1] : text.slice(0,5);
 }
 
 async function saveAttendanceManual() {
@@ -715,7 +728,9 @@ async function saveAttendanceManual() {
   if (tipo === 'trabalho' || tipo === 'feriado_trabalhado') {
     if (hasLunch && ((lunchOut && !lunchIn) || (!lunchOut && lunchIn))) return toast("Informe os dois horários do almoço ou deixe os dois vazios.");
   }
-  const makeDateTime = (time) => time ? `${date}T${time}:00` : null;
+  // Os horários digitados são horários locais da loja (Brasil/Fortaleza).
+  // O -03:00 evita que o Supabase/browser interprete 07:28 como UTC e mostre 04:28.
+  const makeDateTime = (time) => time ? `${date}T${time}:00-03:00` : null;
   const payload = {
     funcionario_id: employee.id,
     data: date,
