@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Dakar Motos — Controle de Troca de Óleo</title>
-<link rel="stylesheet" href="style.css?v=7?v=6">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body><div class="app">
 <header><div class="brand"><img src="logo-dakar.jpg" alt="Dakar Motos"></div><div class="header-title">CONTROLE DE TROCA DE ÓLEO</div><div class="clock" id="clock"></div><button class="menu-btn" id="menuBtn" aria-label="Abrir menu">☰</button></header>
@@ -108,7 +108,21 @@
     <div class="schedule-grid" style="margin-top:12px">
       <label>Saída<input id="attendanceDeparture" type="time"></label>
     </div>
-    <div class="modal-actions"><button class="secondary" id="attendanceCancel">CANCELAR</button><button class="employee-primary" id="attendanceSave">SALVAR HORÁRIOS</button></div>
+    <div class="attendance-status-box">
+      <label>TIPO DO DIA
+        <select id="attendanceStatus">
+          <option value="trabalho">Dia normal de trabalho</option>
+          <option value="feriado_trabalhado">Trabalhou em feriado (+1 dia de crédito)</option>
+          <option value="nao_veio">Não veio trabalhar</option>
+          <option value="folga_ferias">Folga / Férias</option>
+        </select>
+      </label>
+      <label class="credit-days-label">DIAS DE FOLGA/FÉRIAS DISPONÍVEIS (saldo inicial/manual)
+        <input id="attendanceCreditDays" type="number" min="0" step="0.5" placeholder="Ex.: 5">
+      </label>
+    </div>
+    <p class="modal-help">Você pode salvar só a chegada, só a saída ou qualquer combinação de horários. Os campos vazios permanecem vazios para completar depois.</p>
+    <div class="modal-actions"><button class="secondary" id="attendanceCancel">CANCELAR</button><button class="employee-primary" id="attendanceSave">SALVAR LANÇAMENTO</button></div>
   </div>
 </div>
 
@@ -142,5 +156,5 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=7?v=6"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=8"></script>
 </body></html>

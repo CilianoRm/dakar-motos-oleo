@@ -273,7 +273,7 @@ async function clearData() {
 function subscribe() {
   if (!db) return;
   if (channel) db.removeChannel(channel);
-  channel = db.channel("dakar-motos-oleo-v5")
+  channel = db.channel("dakar-motos-oleo-v8")
     .on("postgres_changes", { event:"*", schema:"public", table:"controle" }, () => load({ silent:true }))
     .on("postgres_changes", { event:"*", schema:"public", table:"historico" }, () => load({ silent:true }))
     .on("postgres_changes", { event:"*", schema:"public", table:"funcionarios" }, () => loadEmployees({silent:true}))
@@ -445,7 +445,9 @@ function scheduleFor(employee, dateStr = localDateISO()) {
   return { start:employee.seg_sex_entrada, end:employee.seg_sex_saida, lunchStart:employee.almoco_inicio, lunchEnd:employee.almoco_fim };
 }
 
-function expectedMinutes(employee, dateStr = localDateISO()) {
+function expectedMinutes(employee, dateStr = localDateISO(), tipoDia = 'trabalho') {
+  if (tipoDia === 'feriado_trabalhado') return 0;
+  if (tipoDia === 'folga_ferias') return 0;
   const s = scheduleFor(employee,dateStr);
   if (!s) return 0;
   let total = timeToMinutes(s.end) - timeToMinutes(s.start);
@@ -454,20 +456,32 @@ function expectedMinutes(employee, dateStr = localDateISO()) {
 }
 
 function workedMinutes(point, employee, now = new Date()) {
-  if (!point?.chegada) return 0;
-  const start = new Date(point.chegada).getTime();
-  const end = point.saida ? new Date(point.saida).getTime() : now.getTime();
-  let total = Math.max(0,(end-start)/60000);
+  if (!point) return 0;
+  const date = point.data;
+  const make = (t) => t ? new Date(t).getTime() : null;
+  let total = 0;
+  if (point.chegada) {
+    const start = make(point.chegada);
+    const end = point.saida ? make(point.saida) : (date === localDateISO() ? now.getTime() : null);
+    if (end && end >= start) total += (end-start)/60000;
+  }
   if (point.saida_almoco && point.retorno_almoco) {
-    total -= Math.max(0,(new Date(point.retorno_almoco)-new Date(point.saida_almoco))/60000);
-  } else if (point.saida_almoco && !point.retorno_almoco) {
-    total -= Math.max(0,(end-new Date(point.saida_almoco))/60000);
+    total -= Math.max(0,(make(point.retorno_almoco)-make(point.saida_almoco))/60000);
+  } else if (point.saida_almoco && !point.retorno_almoco && point.saida) {
+    total -= Math.max(0,(make(point.saida)-make(point.saida_almoco))/60000);
   }
   return Math.max(0,total);
 }
 
 function getPoint(id, date = localDateISO()) {
   return employeePoints.find(p => p.funcionario_id === id && p.data === date) || null;
+}
+
+function isCreditType(type){ return type === 'feriado_trabalhado' || type === 'folga_ferias'; }
+function pointCreditDays(point, employee){
+  if (!point) return 0;
+  if (point.tipo_dia === 'feriado_trabalhado') return 1;
+  return 0;
 }
 
 async function loadEmployees({silent=false}={}) {
@@ -501,9 +515,35 @@ function employeePeriodBalance(employeeId) {
   const today = new Date();
   const ym = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
   return employeePoints.filter(p=>p.funcionario_id===employeeId && p.data.startsWith(ym)).reduce((sum,p)=>{
-    const expected = expectedMinutes(employee,p.data);
-    return sum + (workedMinutes(p,employee,new Date(p.saida || (p.data===localDateISO()?Date.now():`${p.data}T23:59:59`))) - expected);
+    if (p.tipo_dia === 'nao_veio' || p.tipo_dia === 'folga_ferias') return sum;
+    const expected = expectedMinutes(employee,p.data,p.tipo_dia);
+    return sum + (workedMinutes(p,employee,new Date()) - expected);
   },0);
+}
+
+function employeeDayLedger(employee){
+  const today = new Date();
+  const ym = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
+  const rows = employeePoints.filter(p=>p.funcionario_id===employee.id && p.data.startsWith(ym));
+  let absenceMinutes=0, holidayCredits=0, usedLeave=0, workedExtra=0;
+  for(const p of rows){
+    const dailyExpected = expectedMinutes(employee,p.data,'trabalho');
+    if(p.tipo_dia==='nao_veio') absenceMinutes += dailyExpected;
+    else if(p.tipo_dia==='feriado_trabalhado') holidayCredits += 1;
+    else if(p.tipo_dia==='folga_ferias') usedLeave += 1;
+    else {
+      const exp=expectedMinutes(employee,p.data,p.tipo_dia); const bal=workedMinutes(p,employee,new Date())-exp;
+      if(bal>0) workedExtra += bal;
+    }
+  }
+  const manualDays = Math.max(0, Number(employee.dias_folga_ferias || 0));
+  const dailyBase = Math.max(1, expectedMinutes(employee, localDateISO(),'trabalho'));
+  const hourCreditsDays = workedExtra / dailyBase;
+  const totalCreditDays = manualDays + holidayCredits + hourCreditsDays;
+  const remainingCredits = Math.max(0, totalCreditDays - usedLeave);
+  const absenceDays = absenceMinutes / dailyBase;
+  const daysMissing = Math.max(0, absenceDays - totalCreditDays);
+  return {absenceMinutes,absenceDays,holidayCredits,usedLeave,manualDays,workedExtra,hourCreditsDays,totalCreditDays,remainingCredits,daysMissing};
 }
 
 function renderEmployees() {
@@ -516,7 +556,7 @@ function renderEmployees() {
 
   list.innerHTML = employeeRows.map(e=>{
     const p=getPoint(e.id,today);
-    const bal=workedMinutes(p,e)-expectedMinutes(e,today);
+    const bal=(p?.tipo_dia==='nao_veio'||p?.tipo_dia==='folga_ferias') ? 0 : workedMinutes(p,e)-expectedMinutes(e,today,p?.tipo_dia||'trabalho');
     return `<button class="employee-list-item ${e.id===selectedEmployeeId?"active":""}" type="button" data-id="${e.id}">
       <span>${escapeHtml(e.nome)}</span><small class="${bal<0?"negative":"positive"}">${minutesToHuman(bal)}</small>
     </button>`;
@@ -526,17 +566,13 @@ function renderEmployees() {
   const e=employeeRows.find(x=>x.id===selectedEmployeeId);
   if (!e) { detail.innerHTML="<p>Nenhum funcionário selecionado.</p>"; return; }
   const p=getPoint(e.id,today);
-  const expected=expectedMinutes(e,today);
-  const worked=workedMinutes(p,e);
-  const daily=worked-expected;
+  const expected=expectedMinutes(e,today,p?.tipo_dia||'trabalho');
+  const worked=(p?.tipo_dia==='nao_veio'||p?.tipo_dia==='folga_ferias') ? 0 : workedMinutes(p,e);
+  const daily=(p?.tipo_dia==='folga_ferias') ? 0 : (p?.tipo_dia==='nao_veio' ? -expectedMinutes(e,today,'trabalho') : worked-expected);
   const period=employeePeriodBalance(e.id);
+  const ledger=employeeDayLedger(e);
   const sch=scheduleFor(e,today);
-  const isHalf=!e.almoco_inicio && !e.almoco_fim;
-  let action="CHEGADA", actionClass="employee-primary";
-  if (p?.chegada && !isHalf && !p.saida_almoco) { action="SAÍDA PARA ALMOÇO"; }
-  else if (p?.chegada && !isHalf && p.saida_almoco && !p.retorno_almoco) { action="RETORNO DO ALMOÇO"; }
-  else if (p?.chegada && !p.saida) { action="SAÍDA"; }
-  else if (p?.saida) { action="PONTO COMPLETO"; actionClass="secondary"; }
+  const statusLabel={trabalho:'DIA NORMAL',feriado_trabalhado:'FERIADO TRABALHADO',nao_veio:'NÃO VEIO',folga_ferias:'FOLGA / FÉRIAS'}[p?.tipo_dia||'trabalho'];
 
   detail.innerHTML=`
     <div class="employee-detail-head">
@@ -550,20 +586,27 @@ function renderEmployees() {
     </div>
     <div class="attendance-card">
       <div class="section-title">REGISTRO DE HOJE <span>${today}</span></div>
+      <div class="attendance-status-line">STATUS: <strong>${statusLabel}</strong></div>
       <div class="attendance-grid">
         <div><small>CHEGADA</small><strong>${fmtTime(p?.chegada)}</strong></div>
         <div><small>SAÍDA ALMOÇO</small><strong>${fmtTime(p?.saida_almoco)}</strong></div>
         <div><small>RETORNO</small><strong>${fmtTime(p?.retorno_almoco)}</strong></div>
         <div><small>SAÍDA</small><strong>${fmtTime(p?.saida)}</strong></div>
       </div>
-      <button class="employee-primary" id="attendanceBtn">LANÇAR HORÁRIOS</button>
-      <button class="secondary" id="clearAttendanceBtn">LIMPAR PONTO DE HOJE</button>
+      <button class="employee-primary" id="attendanceBtn">LANÇAR HORÁRIOS / STATUS</button>
+      <button class="secondary" id="clearAttendanceBtn">LIMPAR LANÇAMENTO DE HOJE</button>
     </div>
     <div class="balance-grid">
       <div><small>HORAS TRABALHADAS</small><strong>${durationHuman(worked)}</strong></div>
       <div><small>HORAS ESPERADAS</small><strong>${durationHuman(expected)}</strong></div>
       <div><small>SALDO DO DIA</small><strong class="${daily<0?"negative":"positive"}">${minutesToHuman(daily)}</strong></div>
       <div><small>SALDO NO MÊS</small><strong class="${period<0?"negative":"positive"}">${minutesToHuman(period)}</strong></div>
+    </div>
+    <div class="credit-summary">
+      <div><small>CRÉDITOS DE FOLGA/FÉRIAS DISPONÍVEIS</small><strong>${ledger.remainingCredits.toFixed(2)}</strong></div>
+      <div><small>FERIADOS TRABALHADOS</small><strong>${ledger.holidayCredits}</strong></div>
+      <div><small>CRÉDITOS DE HORAS CONVERTIDOS EM DIAS</small><strong>${ledger.hourCreditsDays.toFixed(2)}</strong></div>
+      <div><small>DIAS FALTADOS A COMPENSAR</small><strong class="${ledger.daysMissing>0?"negative":"positive"}">${ledger.daysMissing}</strong></div>
     </div>
     <div class="schedule-note-display">${escapeHtml(e.observacao||"")}</div>
   `;
@@ -573,19 +616,20 @@ function renderEmployees() {
 }
 
 function openAttendanceModal(employee) {
-  const p = getPoint(employee.id, localDateISO());
+  const date = localDateISO();
+  const p = getPoint(employee.id, date);
   $("attendanceEmployeeId").value = employee.id;
   $("attendanceEmployeeName").textContent = employee.nome;
-  $("attendanceDate").value = localDateISO();
+  $("attendanceDate").value = date;
   $("attendanceArrival").value = fmtInputTime(p?.chegada);
   $("attendanceLunchOut").value = fmtInputTime(p?.saida_almoco);
   $("attendanceLunchIn").value = fmtInputTime(p?.retorno_almoco);
   $("attendanceDeparture").value = fmtInputTime(p?.saida);
+  $("attendanceStatus").value = p?.tipo_dia || 'trabalho';
+  $("attendanceCreditDays").value = Number(employee.dias_folga_ferias || 0);
   const hasLunch = !!(employee.almoco_inicio && employee.almoco_fim);
   $("attendanceLunchFields").classList.toggle("hidden", !hasLunch);
-  $("attendanceModalHelp").textContent = hasLunch
-    ? "Digite os horários anotados por você. Não importa se o site estava aberto no momento da chegada, almoço ou saída."
-    : "Digite a chegada e a saída anotadas por você. O sistema calcula automaticamente as horas trabalhadas e o saldo.";
+  $("attendanceModalHelp").textContent = "Digite somente o que você tiver anotado. Você pode salvar apenas a chegada e completar o restante depois. Escolha também o tipo do dia quando for feriado, falta ou folga/férias.";
   $("attendanceModal").classList.remove("hidden");
   setTimeout(() => $("attendanceDate")?.focus(), 50);
 }
@@ -607,12 +651,13 @@ async function saveAttendanceManual() {
   const lunchOut = $("attendanceLunchOut").value;
   const lunchIn = $("attendanceLunchIn").value;
   const departure = $("attendanceDeparture").value;
+  const tipo = $("attendanceStatus").value || 'trabalho';
+  const manualDays = Math.max(0, Number($("attendanceCreditDays").value || 0));
   const hasLunch = !!(employee.almoco_inicio && employee.almoco_fim);
-
   if (!date) return toast("Escolha a data.");
-  if (!arrival || !departure) return toast("Informe a chegada e a saída.");
-  if (hasLunch && ((lunchOut && !lunchIn) || (!lunchOut && lunchIn))) return toast("Informe os dois horários do almoço.");
-
+  if (tipo === 'trabalho' || tipo === 'feriado_trabalhado') {
+    if (hasLunch && ((lunchOut && !lunchIn) || (!lunchOut && lunchIn))) return toast("Informe os dois horários do almoço ou deixe os dois vazios.");
+  }
   const makeDateTime = (time) => time ? `${date}T${time}:00` : null;
   const payload = {
     funcionario_id: employee.id,
@@ -621,40 +666,25 @@ async function saveAttendanceManual() {
     saida_almoco: hasLunch && lunchOut ? makeDateTime(lunchOut) : null,
     retorno_almoco: hasLunch && lunchIn ? makeDateTime(lunchIn) : null,
     saida: makeDateTime(departure),
+    tipo_dia: tipo,
     updated_at: localDateTime()
   };
+  // Para folga/férias ou ausência, não carregamos horários antigos sem querer.
+  if (tipo === 'nao_veio' || tipo === 'folga_ferias') {
+    payload.chegada = null; payload.saida_almoco = null; payload.retorno_almoco = null; payload.saida = null;
+  }
   try {
-    const result = await db.from("pontos_funcionarios")
-      .upsert(payload, { onConflict: "funcionario_id,data" })
-      .select().single();
+    const result = await db.from("pontos_funcionarios").upsert(payload, { onConflict: "funcionario_id,data" }).select().single();
     if (result.error) throw result.error;
+    const empUpdate = await db.from("funcionarios").update({dias_folga_ferias:manualDays,updated_at:new Date().toISOString()}).eq("id",employee.id);
+    if (empUpdate.error) throw empUpdate.error;
     closeAttendanceModal();
     await loadEmployees({silent:true});
-    toast(`${employee.nome}: horários salvos com sucesso.`);
+    toast(`${employee.nome}: lançamento salvo.`);
   } catch(error) {
     console.error(error);
-    toast("Erro ao salvar os horários. Confira o Console.");
+    toast("Erro ao salvar o lançamento. Confira o Console.");
   }
-}
-
-async function registerAttendance(employee) {
-  const date=localDateISO();
-  let p=getPoint(employee.id,date);
-  const now=localDateTime();
-  const hasLunch=!!(employee.almoco_inicio&&employee.almoco_fim);
-  let update={updated_at:now};
-  if (!p?.chegada) update.chegada=now;
-  else if (hasLunch && !p.saida_almoco) update.saida_almoco=now;
-  else if (hasLunch && p.saida_almoco && !p.retorno_almoco) update.retorno_almoco=now;
-  else if (!p.saida) update.saida=now;
-  else return toast("O ponto de hoje já está completo.");
-  try {
-    const result=await db.from("pontos_funcionarios").upsert({funcionario_id:employee.id,data:date,...update},{onConflict:"funcionario_id,data"}).select().single();
-    if(result.error) throw result.error;
-    await loadEmployees({silent:true});
-    const label=update.chegada?"Chegada":update.saida_almoco?"Saída para almoço":update.retorno_almoco?"Retorno do almoço":"Saída";
-    toast(`${employee.nome}: ${label} registrada`);
-  } catch(error){ console.error(error); toast("Erro ao registrar ponto. Confira o Console."); }
 }
 
 async function clearAttendance(employee) {

@@ -63,3 +63,19 @@ Dentro de Funcionários, use **ALTERAR HORÁRIOS**. As mudanças são salvas no 
 
 ## V6 — lançamento manual de horários
 O módulo Funcionários agora permite lançar manualmente data, chegada, almoço e saída. O site não registra mais automaticamente o horário atual. O employee_schema.sql não precisa ser executado novamente.
+
+## Atualização V8 — ponto manual, faltas, feriados e folgas/férias
+
+Se o banco já possui o módulo Funcionários da versão anterior, execute **uma única vez** o arquivo `employee_update_v8.sql` no Supabase SQL Editor.
+
+A nova versão permite:
+- lançar somente a chegada e completar a saída depois;
+- lançar qualquer combinação de horários sem exigir o dia completo;
+- registrar feriado trabalhado, gerando 1 dia de crédito;
+- registrar não veio trabalhar;
+- registrar folga/férias;
+- informar dias de folga/férias disponíveis por funcionário;
+- compensar faltas usando créditos de dias e horas extras;
+- alterar horários previstos sem alterar registros históricos.
+
+Para uma instalação nova, `employee_schema.sql` já contém as novas colunas.
