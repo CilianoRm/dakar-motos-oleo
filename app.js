@@ -489,7 +489,7 @@ async function loadEmployees({silent=false}={}) {
   try {
     const [emps, points] = await Promise.all([
       db.from("funcionarios").select("*").eq("ativo",true).order("nome"),
-      db.from("pontos_funcionarios").select("*").gte("data", monthStartISO()).order("data",{ascending:false})
+      db.from("pontos_funcionarios").select("*").order("data",{ascending:false})
     ]);
     if (emps.error) throw emps.error;
     if (points.error) throw points.error;
@@ -612,7 +612,64 @@ function renderEmployees() {
   `;
   $("attendanceBtn")?.addEventListener("click",()=>openAttendanceModal(e));
   $("clearAttendanceBtn")?.addEventListener("click",()=>clearAttendance(e));
+  $("historyBtn")?.addEventListener("click",()=>openEmployeeHistory(e));
   $("editScheduleBtn")?.addEventListener("click",()=>openScheduleModal(e));
+}
+
+function historyStatusLabel(type){
+  return {trabalho:"TRABALHO",feriado_trabalhado:"FERIADO",nao_veio:"FALTA",folga_ferias:"FOLGA / FÉRIAS"}[type] || "TRABALHO";
+}
+function formatDateBR(dateStr){
+  if(!dateStr) return "—";
+  const [y,m,d]=dateStr.split("-");
+  return `${d}/${m}/${y}`;
+}
+function dateRangeDays(start,end){
+  const out=[]; let d=new Date(`${start}T12:00:00`); const last=new Date(`${end}T12:00:00`);
+  while(d<=last){ out.push(localDateISO(d)); d.setDate(d.getDate()+1); }
+  return out;
+}
+function openEmployeeHistory(employee){
+  const end=localDateISO();
+  const d=new Date(); d.setDate(1);
+  const start=localDateISO(d);
+  $("historyEmployeeName").textContent=employee.nome;
+  $("historyStart").value=start;
+  $("historyEnd").value=end;
+  $("employeeHistoryModal").classList.remove("hidden");
+  renderEmployeeHistory(employee,start,end);
+}
+function closeEmployeeHistory(){ $("employeeHistoryModal")?.classList.add("hidden"); }
+function renderEmployeeHistory(employee,start,end){
+  if(!start || !end || start>end){ toast("Informe um período válido."); return; }
+  const pointsByDate=new Map(employeePoints.filter(p=>p.funcionario_id===employee.id).map(p=>[p.data,p]));
+  const days=dateRangeDays(start,end);
+  let workedDays=0, absenceDays=0, leaveDays=0, holidayDays=0, lessDays=0, totalWorked=0, totalExpected=0, totalBalance=0;
+  const rows=[];
+  for(const date of days){
+    const p=pointsByDate.get(date);
+    const type=p?.tipo_dia || null;
+    const expectedNormal=expectedMinutes(employee,date,'trabalho');
+    let expected=expectedNormal, worked=0, balance=0, situation='SEM LANÇAMENTO', cls='';
+    if(type==='nao_veio'){ absenceDays++; balance=-expectedNormal; situation='NÃO VEIO'; cls='row-absence'; }
+    else if(type==='folga_ferias'){ leaveDays++; expected=0; situation='FOLGA / FÉRIAS'; cls='row-leave'; }
+    else if(type==='feriado_trabalhado'){ holidayDays++; expected=0; worked=workedMinutes(p,employee); balance=worked; situation='FERIADO TRABALHADO'; cls='row-holiday'; if(worked>0) workedDays++; }
+    else if(type==='trabalho' || p){ expected=expectedNormal; worked=workedMinutes(p,employee); balance=worked-expected; situation=p?'TRABALHO':'SEM LANÇAMENTO'; if(p) workedDays++; if(p && worked<expected && (p.saida || date<localDateISO())) { lessDays++; cls='row-less'; } }
+    if(p){ totalWorked+=worked; totalExpected+=expected; totalBalance+=balance; }
+    const lunch=(p?.saida_almoco||p?.retorno_almoco) ? `${fmtTime(p?.saida_almoco)} / ${fmtTime(p?.retorno_almoco)}` : '—';
+    rows.push(`<tr class="${cls}"><td>${formatDateBR(date)}</td><td><strong>${situation}</strong></td><td>${fmtTime(p?.chegada)}</td><td>${lunch}</td><td>${fmtTime(p?.retorno_almoco)}</td><td>${fmtTime(p?.saida)}</td><td>${durationHuman(worked)}</td><td class="${balance<0?'negative':'positive'}">${minutesToHuman(balance)}</td></tr>`);
+  }
+  const daysWithExpected=days.filter(d=>expectedMinutes(employee,d,'trabalho')>0).length;
+  $("historySummary").innerHTML=`
+    <div><small>DIAS TRABALHADOS</small><strong>${workedDays}</strong></div>
+    <div><small>FALTAS</small><strong class="${absenceDays?'negative':''}">${absenceDays}</strong></div>
+    <div><small>FOLGAS / FÉRIAS</small><strong>${leaveDays}</strong></div>
+    <div><small>FERIADOS TRABALHADOS</small><strong>${holidayDays}</strong></div>
+    <div><small>DIAS COM MENOS HORAS</small><strong class="${lessDays?'negative':''}">${lessDays}</strong></div>
+    <div><small>HORAS TRABALHADAS</small><strong>${durationHuman(totalWorked)}</strong></div>
+    <div><small>HORAS PREVISTAS</small><strong>${durationHuman(totalExpected)}</strong></div>
+    <div><small>SALDO DO PERÍODO</small><strong class="${totalBalance<0?'negative':'positive'}">${minutesToHuman(totalBalance)}</strong></div>`;
+  $("employeeHistoryBody").innerHTML=rows.join("") || '<tr><td colspan="8">Nenhum dia no período.</td></tr>';
 }
 
 function openAttendanceModal(employee) {
@@ -775,6 +832,9 @@ function setupEmployeeUI(){
   $("attendanceCancel")?.addEventListener("click",closeAttendanceModal);
   $("attendanceSave")?.addEventListener("click",saveAttendanceManual);
   $("attendanceModal")?.addEventListener("click",e=>{if(e.target.id==="attendanceModal")closeAttendanceModal();});
+  $("employeeHistoryClose")?.addEventListener("click",closeEmployeeHistory);
+  $("historyApply")?.addEventListener("click",()=>{const e=employeeRows.find(x=>x.id===selectedEmployeeId); if(e) renderEmployeeHistory(e,$("historyStart").value,$("historyEnd").value);});
+  $("employeeHistoryModal")?.addEventListener("click",e=>{if(e.target.id==="employeeHistoryModal")closeEmployeeHistory();});
 }
 
 const originalInit = init;

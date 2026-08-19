@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Dakar Motos — Controle de Troca de Óleo</title>
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=9">
 </head>
 <body><div class="app">
 <header><div class="brand"><img src="logo-dakar.jpg" alt="Dakar Motos"></div><div class="header-title">CONTROLE DE TROCA DE ÓLEO</div><div class="clock" id="clock"></div><button class="menu-btn" id="menuBtn" aria-label="Abrir menu">☰</button></header>
@@ -126,6 +126,26 @@
   </div>
 </div>
 
+<!-- MODAL DE HISTÓRICO DO FUNCIONÁRIO -->
+<div class="schedule-modal hidden" id="employeeHistoryModal">
+  <div class="history-box">
+    <div class="section-title">HISTÓRICO DO FUNCIONÁRIO <button class="icon-btn" id="employeeHistoryClose">×</button></div>
+    <h2 id="historyEmployeeName" style="margin:8px 0 4px">Funcionário</h2>
+    <div class="history-filters">
+      <label>DATA INICIAL<input id="historyStart" type="date"></label>
+      <label>DATA FINAL<input id="historyEnd" type="date"></label>
+      <button class="secondary" id="historyApply">APLICAR</button>
+    </div>
+    <div id="historySummary" class="history-summary-grid"></div>
+    <div class="employee-history-table-wrap">
+      <table class="employee-history-table">
+        <thead><tr><th>DATA</th><th>SITUAÇÃO</th><th>ENTRADA</th><th>ALMOÇO</th><th>RETORNO</th><th>SAÍDA</th><th>TRABALHADAS</th><th>SALDO</th></tr></thead>
+        <tbody id="employeeHistoryBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL DE ALTERAÇÃO DE HORÁRIO -->
 <div class="schedule-modal hidden" id="scheduleModal">
   <div class="schedule-box">
@@ -156,5 +176,5 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=8"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=9"></script>
 </body></html>

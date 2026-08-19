@@ -79,3 +79,7 @@ A nova versão permite:
 - alterar horários previstos sem alterar registros históricos.
 
 Para uma instalação nova, `employee_schema.sql` já contém as novas colunas.
+
+
+## V9 — Histórico de funcionários
+A aba Funcionários agora possui histórico por funcionário, filtro por período, resumo de dias trabalhados/faltas/folgas/feriados, dias com menos horas e saldo de horas. Não é necessário SQL adicional: a V9 utiliza as tabelas criadas na V8.
