@@ -273,9 +273,11 @@ async function clearData() {
 function subscribe() {
   if (!db) return;
   if (channel) db.removeChannel(channel);
-  channel = db.channel("dakar-motos-oleo-v4")
+  channel = db.channel("dakar-motos-oleo-v5")
     .on("postgres_changes", { event:"*", schema:"public", table:"controle" }, () => load({ silent:true }))
     .on("postgres_changes", { event:"*", schema:"public", table:"historico" }, () => load({ silent:true }))
+    .on("postgres_changes", { event:"*", schema:"public", table:"funcionarios" }, () => loadEmployees({silent:true}))
+    .on("postgres_changes", { event:"*", schema:"public", table:"pontos_funcionarios" }, () => loadEmployees({silent:true}))
     .subscribe(status => {
       console.log("Dakar Motos Realtime:", status);
     });
@@ -379,3 +381,306 @@ if (new URLSearchParams(location.search).get("painel") === "1") {
 }
 
 document.addEventListener("DOMContentLoaded", init);
+
+/* =========================
+   MÓDULO FUNCIONÁRIOS V5
+   ========================= */
+const EMPLOYEE_PASSWORD = "Marcos8904";
+let employeeRows = [];
+let employeePoints = [];
+let selectedEmployeeId = "CILIANO";
+let employeeChannel = null;
+
+function localDateISO(date = new Date()) {
+  const d = new Date(date);
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const day = String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+}
+
+function localDateTime(date = new Date()) {
+  const d = new Date(date);
+  const off = d.getTimezoneOffset();
+  return new Date(d.getTime() - off*60000).toISOString().slice(0,19);
+}
+
+function timeToMinutes(v) {
+  if (!v) return null;
+  const [h,m] = String(v).slice(0,5).split(":").map(Number);
+  return h*60+m;
+}
+
+function minutesToHuman(mins) {
+  const sign = mins < 0 ? "-" : "+";
+  let n = Math.abs(Math.round(mins));
+  const h = Math.floor(n/60);
+  const m = n%60;
+  return `${sign}${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+}
+
+function durationHuman(mins) {
+  const n = Math.max(0, Math.round(mins || 0));
+  return `${String(Math.floor(n/60)).padStart(2,"0")}:${String(n%60).padStart(2,"0")}`;
+}
+
+function fmtTime(v) {
+  if (!v) return "—";
+  return new Date(v).toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"});
+}
+
+function weekdayForDate(dateStr) {
+  const [y,m,d] = dateStr.split("-").map(Number);
+  return new Date(y,m-1,d).getDay();
+}
+
+function scheduleFor(employee, dateStr = localDateISO()) {
+  const day = weekdayForDate(dateStr);
+  if (day === 0) return null;
+  if (day === 6) {
+    if (!employee.sab_entrada || !employee.sab_saida) return null;
+    return { start:employee.sab_entrada, end:employee.sab_saida, lunchStart:employee.almoco_inicio, lunchEnd:employee.almoco_fim };
+  }
+  if (!employee.seg_sex_entrada || !employee.seg_sex_saida) return null;
+  return { start:employee.seg_sex_entrada, end:employee.seg_sex_saida, lunchStart:employee.almoco_inicio, lunchEnd:employee.almoco_fim };
+}
+
+function expectedMinutes(employee, dateStr = localDateISO()) {
+  const s = scheduleFor(employee,dateStr);
+  if (!s) return 0;
+  let total = timeToMinutes(s.end) - timeToMinutes(s.start);
+  if (s.lunchStart && s.lunchEnd) total -= timeToMinutes(s.lunchEnd)-timeToMinutes(s.lunchStart);
+  return Math.max(0,total);
+}
+
+function workedMinutes(point, employee, now = new Date()) {
+  if (!point?.chegada) return 0;
+  const start = new Date(point.chegada).getTime();
+  const end = point.saida ? new Date(point.saida).getTime() : now.getTime();
+  let total = Math.max(0,(end-start)/60000);
+  if (point.saida_almoco && point.retorno_almoco) {
+    total -= Math.max(0,(new Date(point.retorno_almoco)-new Date(point.saida_almoco))/60000);
+  } else if (point.saida_almoco && !point.retorno_almoco) {
+    total -= Math.max(0,(end-new Date(point.saida_almoco))/60000);
+  }
+  return Math.max(0,total);
+}
+
+function getPoint(id, date = localDateISO()) {
+  return employeePoints.find(p => p.funcionario_id === id && p.data === date) || null;
+}
+
+async function loadEmployees({silent=false}={}) {
+  if (!db) return;
+  try {
+    const [emps, points] = await Promise.all([
+      db.from("funcionarios").select("*").eq("ativo",true).order("nome"),
+      db.from("pontos_funcionarios").select("*").gte("data", monthStartISO()).order("data",{ascending:false})
+    ]);
+    if (emps.error) throw emps.error;
+    if (points.error) throw points.error;
+    employeeRows = emps.data || [];
+    employeePoints = points.data || [];
+    if (!employeeRows.some(e=>e.id===selectedEmployeeId)) selectedEmployeeId = employeeRows[0]?.id || "";
+    renderEmployees();
+  } catch(error) {
+    console.error("Funcionários — erro ao carregar:",error);
+    if (!silent) toast("Não foi possível carregar Funcionários. Execute employee_schema.sql no Supabase.");
+  }
+}
+
+function monthStartISO() {
+  const d = new Date();
+  d.setDate(1);
+  return localDateISO(d);
+}
+
+function employeePeriodBalance(employeeId) {
+  const employee = employeeRows.find(e=>e.id===employeeId);
+  if (!employee) return 0;
+  const today = new Date();
+  const ym = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
+  return employeePoints.filter(p=>p.funcionario_id===employeeId && p.data.startsWith(ym)).reduce((sum,p)=>{
+    const expected = expectedMinutes(employee,p.data);
+    return sum + (workedMinutes(p,employee,new Date(p.saida || (p.data===localDateISO()?Date.now():`${p.data}T23:59:59`))) - expected);
+  },0);
+}
+
+function renderEmployees() {
+  const list = $("employeeList");
+  const detail = $("employeeDetail");
+  if (!list || !detail) return;
+  const today = localDateISO();
+  const todayLabel = new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"2-digit",year:"numeric"});
+  if ($("employeeDate")) $("employeeDate").textContent = todayLabel;
+
+  list.innerHTML = employeeRows.map(e=>{
+    const p=getPoint(e.id,today);
+    const bal=workedMinutes(p,e)-expectedMinutes(e,today);
+    return `<button class="employee-list-item ${e.id===selectedEmployeeId?"active":""}" type="button" data-id="${e.id}">
+      <span>${escapeHtml(e.nome)}</span><small class="${bal<0?"negative":"positive"}">${minutesToHuman(bal)}</small>
+    </button>`;
+  }).join("") || `<div class="empty-employees">Nenhum funcionário encontrado.</div>`;
+  list.querySelectorAll(".employee-list-item").forEach(b=>b.addEventListener("click",()=>{selectedEmployeeId=b.dataset.id;renderEmployees();}));
+
+  const e=employeeRows.find(x=>x.id===selectedEmployeeId);
+  if (!e) { detail.innerHTML="<p>Nenhum funcionário selecionado.</p>"; return; }
+  const p=getPoint(e.id,today);
+  const expected=expectedMinutes(e,today);
+  const worked=workedMinutes(p,e);
+  const daily=worked-expected;
+  const period=employeePeriodBalance(e.id);
+  const sch=scheduleFor(e,today);
+  const isHalf=!e.almoco_inicio && !e.almoco_fim;
+  let action="CHEGADA", actionClass="employee-primary";
+  if (p?.chegada && !isHalf && !p.saida_almoco) { action="SAÍDA PARA ALMOÇO"; }
+  else if (p?.chegada && !isHalf && p.saida_almoco && !p.retorno_almoco) { action="RETORNO DO ALMOÇO"; }
+  else if (p?.chegada && !p.saida) { action="SAÍDA"; }
+  else if (p?.saida) { action="PONTO COMPLETO"; actionClass="secondary"; }
+
+  detail.innerHTML=`
+    <div class="employee-detail-head">
+      <div><span class="employee-tag">ATIVO</span><h1>${escapeHtml(e.nome)}</h1></div>
+      <button class="secondary" id="editScheduleBtn">ALTERAR HORÁRIOS</button>
+    </div>
+    <div class="schedule-summary">
+      <div><b>HORÁRIO DE TRABALHO</b><span>Seg a Sex: ${e.seg_sex_entrada||"—"} às ${e.seg_sex_saida||"—"}</span><span>Sábado: ${e.sab_entrada&&e.sab_saida?`${e.sab_entrada} às ${e.sab_saida}`:"Não trabalha"}</span></div>
+      <div><b>ALMOÇO</b><span>${e.almoco_inicio&&e.almoco_fim?`${e.almoco_inicio} às ${e.almoco_fim}`:"Sem horário de almoço"}</span></div>
+      <div><b>CARGA ESPERADA HOJE</b><span>${durationHuman(expected)}</span></div>
+    </div>
+    <div class="attendance-card">
+      <div class="section-title">REGISTRO DE HOJE <span>${today}</span></div>
+      <div class="attendance-grid">
+        <div><small>CHEGADA</small><strong>${fmtTime(p?.chegada)}</strong></div>
+        <div><small>SAÍDA ALMOÇO</small><strong>${fmtTime(p?.saida_almoco)}</strong></div>
+        <div><small>RETORNO</small><strong>${fmtTime(p?.retorno_almoco)}</strong></div>
+        <div><small>SAÍDA</small><strong>${fmtTime(p?.saida)}</strong></div>
+      </div>
+      <button class="${actionClass}" id="attendanceBtn" ${action==="PONTO COMPLETO"?"disabled":""}>${action}</button>
+      <button class="secondary" id="clearAttendanceBtn">LIMPAR PONTO DE HOJE</button>
+    </div>
+    <div class="balance-grid">
+      <div><small>HORAS TRABALHADAS</small><strong>${durationHuman(worked)}</strong></div>
+      <div><small>HORAS ESPERADAS</small><strong>${durationHuman(expected)}</strong></div>
+      <div><small>SALDO DO DIA</small><strong class="${daily<0?"negative":"positive"}">${minutesToHuman(daily)}</strong></div>
+      <div><small>SALDO NO MÊS</small><strong class="${period<0?"negative":"positive"}">${minutesToHuman(period)}</strong></div>
+    </div>
+    <div class="schedule-note-display">${escapeHtml(e.observacao||"")}</div>
+  `;
+  $("attendanceBtn")?.addEventListener("click",()=>registerAttendance(e));
+  $("clearAttendanceBtn")?.addEventListener("click",()=>clearAttendance(e));
+  $("editScheduleBtn")?.addEventListener("click",()=>openScheduleModal(e));
+}
+
+async function registerAttendance(employee) {
+  const date=localDateISO();
+  let p=getPoint(employee.id,date);
+  const now=localDateTime();
+  const hasLunch=!!(employee.almoco_inicio&&employee.almoco_fim);
+  let update={updated_at:now};
+  if (!p?.chegada) update.chegada=now;
+  else if (hasLunch && !p.saida_almoco) update.saida_almoco=now;
+  else if (hasLunch && p.saida_almoco && !p.retorno_almoco) update.retorno_almoco=now;
+  else if (!p.saida) update.saida=now;
+  else return toast("O ponto de hoje já está completo.");
+  try {
+    const result=await db.from("pontos_funcionarios").upsert({funcionario_id:employee.id,data:date,...update},{onConflict:"funcionario_id,data"}).select().single();
+    if(result.error) throw result.error;
+    await loadEmployees({silent:true});
+    const label=update.chegada?"Chegada":update.saida_almoco?"Saída para almoço":update.retorno_almoco?"Retorno do almoço":"Saída";
+    toast(`${employee.nome}: ${label} registrada`);
+  } catch(error){ console.error(error); toast("Erro ao registrar ponto. Confira o Console."); }
+}
+
+async function clearAttendance(employee) {
+  if(!confirm(`Limpar o ponto de hoje de ${employee.nome}?`)) return;
+  try {
+    const r=await db.from("pontos_funcionarios").delete().eq("funcionario_id",employee.id).eq("data",localDateISO());
+    if(r.error) throw r.error;
+    await loadEmployees({silent:true});
+    toast("Ponto de hoje apagado.");
+  } catch(error){console.error(error);toast("Erro ao limpar o ponto.");}
+}
+
+function openScheduleModal(employee) {
+  $("scheduleEmployeeId").value=employee.id;
+  $("segEntrada").value=(employee.seg_sex_entrada||"").slice(0,5);
+  $("segSaida").value=(employee.seg_sex_saida||"").slice(0,5);
+  $("sabEntrada").value=(employee.sab_entrada||"").slice(0,5);
+  $("sabSaida").value=(employee.sab_saida||"").slice(0,5);
+  $("almocoInicio").value=(employee.almoco_inicio||"").slice(0,5);
+  $("almocoFim").value=(employee.almoco_fim||"").slice(0,5);
+  $("scheduleObservation").value=employee.observacao||"";
+  $("scheduleModal").classList.remove("hidden");
+}
+
+function closeScheduleModal() { $("scheduleModal")?.classList.add("hidden"); }
+
+async function saveSchedule() {
+  const id=$("scheduleEmployeeId").value;
+  const payload={
+    seg_sex_entrada:$("segEntrada").value||null,
+    seg_sex_saida:$("segSaida").value||null,
+    sab_entrada:$("sabEntrada").value||null,
+    sab_saida:$("sabSaida").value||null,
+    almoco_inicio:$("almocoInicio").value||null,
+    almoco_fim:$("almocoFim").value||null,
+    observacao:$("scheduleObservation").value.trim()||null,
+    updated_at:new Date().toISOString()
+  };
+  if((payload.seg_sex_entrada && !payload.seg_sex_saida) || (!payload.seg_sex_entrada && payload.seg_sex_saida)) return toast("Preencha entrada e saída de segunda a sexta.");
+  if((payload.sab_entrada && !payload.sab_saida) || (!payload.sab_entrada && payload.sab_saida)) return toast("Preencha entrada e saída do sábado, ou deixe os dois vazios.");
+  if((payload.almoco_inicio && !payload.almoco_fim) || (!payload.almoco_inicio && payload.almoco_fim)) return toast("Preencha início e retorno do almoço, ou deixe os dois vazios.");
+  try {
+    const r=await db.from("funcionarios").update(payload).eq("id",id);
+    if(r.error) throw r.error;
+    closeScheduleModal();
+    await loadEmployees({silent:true});
+    toast("Horários salvos com sucesso.");
+  } catch(error){console.error(error);toast("Erro ao salvar os horários.");}
+}
+
+function openMenu(){ $("menuOverlay")?.classList.remove("hidden"); }
+function closeMenu(){ $("menuOverlay")?.classList.add("hidden"); }
+function openEmployeeLogin(){
+  closeMenu();
+  $("employeePassword").value="";
+  $("employeeLogin")?.classList.remove("hidden");
+  setTimeout(()=>$("employeePassword")?.focus(),50);
+}
+function closeEmployeeLogin(){ $("employeeLogin")?.classList.add("hidden"); }
+function employeeLogin(){
+  if($("employeePassword").value===EMPLOYEE_PASSWORD){
+    closeEmployeeLogin();
+    $("controlView")?.classList.add("hidden");
+    $("tvView")?.classList.add("hidden");
+    $("employeesView")?.classList.remove("hidden");
+    loadEmployees();
+  } else toast("Senha incorreta.");
+}
+function closeEmployees(){
+  $("employeesView")?.classList.add("hidden");
+  $("controlView")?.classList.remove("hidden");
+}
+
+function setupEmployeeUI(){
+  $("menuBtn")?.addEventListener("click",openMenu);
+  $("menuClose")?.addEventListener("click",closeMenu);
+  $("menuOverlay")?.addEventListener("click",e=>{if(e.target.id==="menuOverlay")closeMenu();});
+  $("employeesMenu")?.addEventListener("click",openEmployeeLogin);
+  $("employeeLoginBtn")?.addEventListener("click",employeeLogin);
+  $("employeeLoginCancel")?.addEventListener("click",closeEmployeeLogin);
+  $("employeePassword")?.addEventListener("keydown",e=>{if(e.key==="Enter")employeeLogin();});
+  $("employeesBack")?.addEventListener("click",closeEmployees);
+  $("scheduleClose")?.addEventListener("click",closeScheduleModal);
+  $("scheduleCancel")?.addEventListener("click",closeScheduleModal);
+  $("scheduleSave")?.addEventListener("click",saveSchedule);
+  $("scheduleModal")?.addEventListener("click",e=>{if(e.target.id==="scheduleModal")closeScheduleModal();});
+}
+
+const originalInit = init;
+// Complementa a inicialização original sem substituir a lógica do controle de óleo.
+document.addEventListener("DOMContentLoaded", () => {
+  setupEmployeeUI();
+  const oldSubscribe = subscribe;
+});
