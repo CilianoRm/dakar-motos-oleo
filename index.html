@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Dakar Motos — Controle de Troca de Óleo</title>
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body><div class="app">
 <header><div class="brand"><img src="logo-dakar.jpg" alt="Dakar Motos"></div><div class="header-title">CONTROLE DE TROCA DE ÓLEO</div><div class="clock" id="clock"></div><button class="menu-btn" id="menuBtn" aria-label="Abrir menu">☰</button></header>
@@ -90,6 +90,28 @@
   </div>
 </main>
 
+<!-- MODAL DE LANÇAMENTO MANUAL DE PONTO -->
+<div class="schedule-modal hidden" id="attendanceModal">
+  <div class="schedule-box">
+    <div class="section-title">LANÇAR HORÁRIOS <button class="icon-btn" id="attendanceClose">×</button></div>
+    <h2 id="attendanceEmployeeName" style="margin:8px 0 4px">Funcionário</h2>
+    <p class="modal-help" id="attendanceModalHelp">Digite os horários anotados por você. O sistema calcula automaticamente as horas trabalhadas e o saldo.</p>
+    <input type="hidden" id="attendanceEmployeeId">
+    <div class="schedule-grid">
+      <label>Data<input id="attendanceDate" type="date"></label>
+      <label>Chegada<input id="attendanceArrival" type="time"></label>
+    </div>
+    <div id="attendanceLunchFields" class="schedule-grid" style="margin-top:12px">
+      <label>Saída para almoço<input id="attendanceLunchOut" type="time"></label>
+      <label>Retorno do almoço<input id="attendanceLunchIn" type="time"></label>
+    </div>
+    <div class="schedule-grid" style="margin-top:12px">
+      <label>Saída<input id="attendanceDeparture" type="time"></label>
+    </div>
+    <div class="modal-actions"><button class="secondary" id="attendanceCancel">CANCELAR</button><button class="employee-primary" id="attendanceSave">SALVAR HORÁRIOS</button></div>
+  </div>
+</div>
+
 <!-- MODAL DE ALTERAÇÃO DE HORÁRIO -->
 <div class="schedule-modal hidden" id="scheduleModal">
   <div class="schedule-box">
@@ -120,5 +142,5 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=5"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=6"></script>
 </body></html>

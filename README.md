@@ -59,3 +59,7 @@ Cada funcionário pode registrar, em sequência, chegada, saída para almoço, r
 Dentro de Funcionários, use **ALTERAR HORÁRIOS**. As mudanças são salvas no Supabase e valem para os próximos registros; pontos antigos não são recalculados.
 
 > Observação de segurança: a senha do módulo é uma trava de interface no navegador, não um mecanismo de segurança empresarial. Para dados trabalhistas sensíveis, o ideal é futuramente migrar o acesso para autenticação do Supabase.
+
+
+## V6 — lançamento manual de horários
+O módulo Funcionários agora permite lançar manualmente data, chegada, almoço e saída. O site não registra mais automaticamente o horário atual. O employee_schema.sql não precisa ser executado novamente.
