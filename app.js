@@ -556,7 +556,7 @@ function renderEmployees() {
         <div><small>RETORNO</small><strong>${fmtTime(p?.retorno_almoco)}</strong></div>
         <div><small>SAÍDA</small><strong>${fmtTime(p?.saida)}</strong></div>
       </div>
-      <button class="${actionClass}" id="attendanceBtn" ${action==="PONTO COMPLETO"?"disabled":""}>${action}</button>
+      <button class="employee-primary" id="attendanceBtn">LANÇAR HORÁRIOS</button>
       <button class="secondary" id="clearAttendanceBtn">LIMPAR PONTO DE HOJE</button>
     </div>
     <div class="balance-grid">
@@ -567,9 +567,74 @@ function renderEmployees() {
     </div>
     <div class="schedule-note-display">${escapeHtml(e.observacao||"")}</div>
   `;
-  $("attendanceBtn")?.addEventListener("click",()=>registerAttendance(e));
+  $("attendanceBtn")?.addEventListener("click",()=>openAttendanceModal(e));
   $("clearAttendanceBtn")?.addEventListener("click",()=>clearAttendance(e));
   $("editScheduleBtn")?.addEventListener("click",()=>openScheduleModal(e));
+}
+
+function openAttendanceModal(employee) {
+  const p = getPoint(employee.id, localDateISO());
+  $("attendanceEmployeeId").value = employee.id;
+  $("attendanceEmployeeName").textContent = employee.nome;
+  $("attendanceDate").value = localDateISO();
+  $("attendanceArrival").value = fmtInputTime(p?.chegada);
+  $("attendanceLunchOut").value = fmtInputTime(p?.saida_almoco);
+  $("attendanceLunchIn").value = fmtInputTime(p?.retorno_almoco);
+  $("attendanceDeparture").value = fmtInputTime(p?.saida);
+  const hasLunch = !!(employee.almoco_inicio && employee.almoco_fim);
+  $("attendanceLunchFields").classList.toggle("hidden", !hasLunch);
+  $("attendanceModalHelp").textContent = hasLunch
+    ? "Digite os horários anotados por você. Não importa se o site estava aberto no momento da chegada, almoço ou saída."
+    : "Digite a chegada e a saída anotadas por você. O sistema calcula automaticamente as horas trabalhadas e o saldo.";
+  $("attendanceModal").classList.remove("hidden");
+  setTimeout(() => $("attendanceDate")?.focus(), 50);
+}
+
+function closeAttendanceModal() { $("attendanceModal")?.classList.add("hidden"); }
+
+function fmtInputTime(value) {
+  if (!value) return "";
+  const m = String(value).match(/(?:T|\s)(\d{2}:\d{2})/);
+  return m ? m[1] : String(value).slice(0,5);
+}
+
+async function saveAttendanceManual() {
+  const id = $("attendanceEmployeeId").value;
+  const employee = employeeRows.find(x => String(x.id) === String(id));
+  if (!employee) return toast("Funcionário não encontrado.");
+  const date = $("attendanceDate").value;
+  const arrival = $("attendanceArrival").value;
+  const lunchOut = $("attendanceLunchOut").value;
+  const lunchIn = $("attendanceLunchIn").value;
+  const departure = $("attendanceDeparture").value;
+  const hasLunch = !!(employee.almoco_inicio && employee.almoco_fim);
+
+  if (!date) return toast("Escolha a data.");
+  if (!arrival || !departure) return toast("Informe a chegada e a saída.");
+  if (hasLunch && ((lunchOut && !lunchIn) || (!lunchOut && lunchIn))) return toast("Informe os dois horários do almoço.");
+
+  const makeDateTime = (time) => time ? `${date}T${time}:00` : null;
+  const payload = {
+    funcionario_id: employee.id,
+    data: date,
+    chegada: makeDateTime(arrival),
+    saida_almoco: hasLunch && lunchOut ? makeDateTime(lunchOut) : null,
+    retorno_almoco: hasLunch && lunchIn ? makeDateTime(lunchIn) : null,
+    saida: makeDateTime(departure),
+    updated_at: localDateTime()
+  };
+  try {
+    const result = await db.from("pontos_funcionarios")
+      .upsert(payload, { onConflict: "funcionario_id,data" })
+      .select().single();
+    if (result.error) throw result.error;
+    closeAttendanceModal();
+    await loadEmployees({silent:true});
+    toast(`${employee.nome}: horários salvos com sucesso.`);
+  } catch(error) {
+    console.error(error);
+    toast("Erro ao salvar os horários. Confira o Console.");
+  }
 }
 
 async function registerAttendance(employee) {
@@ -676,6 +741,10 @@ function setupEmployeeUI(){
   $("scheduleCancel")?.addEventListener("click",closeScheduleModal);
   $("scheduleSave")?.addEventListener("click",saveSchedule);
   $("scheduleModal")?.addEventListener("click",e=>{if(e.target.id==="scheduleModal")closeScheduleModal();});
+  $("attendanceClose")?.addEventListener("click",closeAttendanceModal);
+  $("attendanceCancel")?.addEventListener("click",closeAttendanceModal);
+  $("attendanceSave")?.addEventListener("click",saveAttendanceManual);
+  $("attendanceModal")?.addEventListener("click",e=>{if(e.target.id==="attendanceModal")closeAttendanceModal();});
 }
 
 const originalInit = init;
