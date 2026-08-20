@@ -83,3 +83,10 @@ Para uma instalação nova, `employee_schema.sql` já contém as novas colunas.
 
 ## V9 — Histórico de funcionários
 A aba Funcionários agora possui histórico por funcionário, filtro por período, resumo de dias trabalhados/faltas/folgas/feriados, dias com menos horas e saldo de horas. Não é necessário SQL adicional: a V9 utiliza as tabelas criadas na V8.
+
+
+## V11 — Agenda retrátil e saldo inicial
+- Agenda do funcionário começa recolhida e abre ao clicar em “AGENDA DO FUNCIONÁRIO”.
+- Permite navegar por meses anteriores e futuros.
+- Permite informar dias já devidos/faltas anteriores.
+- Execute `agenda_update_v11.sql` uma única vez no Supabase antes de usar a agenda/saldos.
