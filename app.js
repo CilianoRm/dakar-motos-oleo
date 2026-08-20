@@ -278,13 +278,14 @@ function subscribe() {
     .on("postgres_changes", { event:"*", schema:"public", table:"historico" }, () => load({ silent:true }))
     .on("postgres_changes", { event:"*", schema:"public", table:"funcionarios" }, () => loadEmployees({silent:true}))
     .on("postgres_changes", { event:"*", schema:"public", table:"pontos_funcionarios" }, () => loadEmployees({silent:true}))
+    .on("postgres_changes", { event:"*", schema:"public", table:"agenda_funcionarios" }, () => loadEmployees({silent:true}))
     .subscribe(status => {
       console.log("Dakar Motos Realtime:", status);
     });
 
   clearInterval(pollingTimer);
   // Realtime é o principal. Este polling é uma proteção caso algum navegador/roteador bloqueie WebSocket.
-  pollingTimer = setInterval(() => load({ silent:true }), 5000);
+  pollingTimer = setInterval(() => { load({ silent:true }); if(!$('employeesView')?.classList.contains('hidden')) loadEmployees({silent:true}); }, 5000);
 }
 
 function fmt(value) {
@@ -476,8 +477,18 @@ function workedMinutes(point, employee, now = new Date()) {
 function getPoint(id, date = localDateISO()) {
   return employeePoints.find(p => p.funcionario_id === id && p.data === date) || null;
 }
+function getAgenda(id, date = localDateISO()) {
+  return employeeAgenda.find(a => a.funcionario_id === id && a.data === date) || null;
+}
+function effectiveDayType(id, date = localDateISO()) {
+  const a = getAgenda(id,date);
+  if (a?.tipo) return a.tipo;
+  const p = getPoint(id,date);
+  return p?.tipo_dia || 'trabalho';
+}
+function agendaLabel(type){ return {trabalho:'TRABALHO',folga:'FOLGA',ferias:'FÉRIAS',feriado_trabalhado:'FERIADO TRABALHADO',nao_veio:'NÃO VEIO'}[type] || 'TRABALHO'; }
 
-function isCreditType(type){ return type === 'feriado_trabalhado' || type === 'folga_ferias'; }
+function isCreditType(type){ return type === 'feriado_trabalhado' || type === 'folga_ferias' || type === 'folga' || type === 'ferias'; }
 function pointCreditDays(point, employee){
   if (!point) return 0;
   if (point.tipo_dia === 'feriado_trabalhado') return 1;
@@ -487,14 +498,17 @@ function pointCreditDays(point, employee){
 async function loadEmployees({silent=false}={}) {
   if (!db) return;
   try {
-    const [emps, points] = await Promise.all([
+    const [emps, points, agenda] = await Promise.all([
       db.from("funcionarios").select("*").eq("ativo",true).order("nome"),
-      db.from("pontos_funcionarios").select("*").order("data",{ascending:false})
+      db.from("pontos_funcionarios").select("*").order("data",{ascending:false}),
+      db.from("agenda_funcionarios").select("*").order("data",{ascending:true})
     ]);
     if (emps.error) throw emps.error;
     if (points.error) throw points.error;
+    if (agenda.error) throw agenda.error;
     employeeRows = emps.data || [];
     employeePoints = points.data || [];
+    employeeAgenda = agenda.data || [];
     if (!employeeRows.some(e=>e.id===selectedEmployeeId)) selectedEmployeeId = employeeRows[0]?.id || "";
     renderEmployees();
   } catch(error) {
@@ -515,8 +529,9 @@ function employeePeriodBalance(employeeId) {
   const today = new Date();
   const ym = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
   return employeePoints.filter(p=>p.funcionario_id===employeeId && p.data.startsWith(ym)).reduce((sum,p)=>{
-    if (p.tipo_dia === 'nao_veio' || p.tipo_dia === 'folga_ferias') return sum;
-    const expected = expectedMinutes(employee,p.data,p.tipo_dia);
+    const type = effectiveDayType(employeeId,p.data);
+    if (type === 'nao_veio' || type === 'folga_ferias' || type === 'folga' || type === 'ferias') return sum;
+    const expected = expectedMinutes(employee,p.data,type);
     return sum + (workedMinutes(p,employee,new Date()) - expected);
   },0);
 }
@@ -527,14 +542,12 @@ function employeeDayLedger(employee){
   const rows = employeePoints.filter(p=>p.funcionario_id===employee.id && p.data.startsWith(ym));
   let absenceMinutes=0, holidayCredits=0, usedLeave=0, workedExtra=0;
   for(const p of rows){
+    const type = effectiveDayType(employee.id,p.data);
     const dailyExpected = expectedMinutes(employee,p.data,'trabalho');
-    if(p.tipo_dia==='nao_veio') absenceMinutes += dailyExpected;
-    else if(p.tipo_dia==='feriado_trabalhado') holidayCredits += 1;
-    else if(p.tipo_dia==='folga_ferias') usedLeave += 1;
-    else {
-      const exp=expectedMinutes(employee,p.data,p.tipo_dia); const bal=workedMinutes(p,employee,new Date())-exp;
-      if(bal>0) workedExtra += bal;
-    }
+    if(type==='nao_veio') absenceMinutes += dailyExpected;
+    else if(type==='feriado_trabalhado') holidayCredits += 1;
+    else if(type==='folga' || type==='ferias' || type==='folga_ferias') usedLeave += 1;
+    else { const bal=workedMinutes(p,employee,new Date())-dailyExpected; if(bal>0) workedExtra += bal; }
   }
   const manualDays = Math.max(0, Number(employee.dias_folga_ferias || 0));
   const dailyBase = Math.max(1, expectedMinutes(employee, localDateISO(),'trabalho'));
@@ -546,74 +559,55 @@ function employeeDayLedger(employee){
   return {absenceMinutes,absenceDays,holidayCredits,usedLeave,manualDays,workedExtra,hourCreditsDays,totalCreditDays,remainingCredits,daysMissing};
 }
 
+function calendarTitle(d){ return d.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}).replace(/^./,c=>c.toUpperCase()); }
+function renderEmployeeCalendar(employee){
+  const host=$("employeeCalendar"); if(!host)return;
+  const y=calendarMonth.getFullYear(),m=calendarMonth.getMonth(),first=new Date(y,m,1),start=(first.getDay()+6)%7,daysIn=new Date(y,m+1,0).getDate(),cells=[];
+  for(let i=0;i<start;i++)cells.push('<div class="calendar-day empty"></div>');
+  for(let day=1;day<=daysIn;day++){
+    const date=`${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`,p=getPoint(employee.id,date),a=getAgenda(employee.id,date),type=a?.tipo||p?.tipo_dia||null;
+    const expected=expectedMinutes(employee,date,'trabalho'),worked=(type==='trabalho'||type==='feriado_trabalhado')?workedMinutes(p,employee):0,bal=type==='trabalho'?worked-expected:(type==='feriado_trabalhado'?worked:0);
+    let badge='';
+    if(type==='folga')badge='<span class="calendar-badge off">FOLGA</span>';
+    else if(type==='ferias')badge='<span class="calendar-badge vacation">FÉRIAS</span>';
+    else if(type==='feriado_trabalhado')badge='<span class="calendar-badge holiday">FERIADO</span>';
+    else if(type==='nao_veio')badge='<span class="calendar-badge absence">FALTOU</span>';
+    else if(p&&(p.chegada||p.saida))badge=`<span class="calendar-badge ${bal<0?'less':'more'}">${minutesToHuman(bal)}</span>`;
+    else if(weekdayForDate(date)===0)badge='<span class="calendar-badge weekend">DOM</span>';
+    else if(weekdayForDate(date)===6&&!scheduleFor(employee,date))badge='<span class="calendar-badge weekend">SÁB</span>';
+    cells.push(`<button type="button" class="calendar-day ${date===selectedCalendarDate?'selected':''} ${date===localDateISO()?'today':''}" data-date="${date}"><b>${day}</b>${badge}</button>`);
+  }
+  host.innerHTML=`<div class="calendar-head"><button class="icon-btn" id="calPrev">‹</button><strong>${calendarTitle(calendarMonth)}</strong><button class="icon-btn" id="calNext">›</button></div><div class="calendar-week"><span>SEG</span><span>TER</span><span>QUA</span><span>QUI</span><span>SEX</span><span>SÁB</span><span>DOM</span></div><div class="calendar-grid">${cells.join('')}</div>`;
+  host.querySelectorAll('.calendar-day:not(.empty)').forEach(btn=>btn.addEventListener('click',()=>{selectedCalendarDate=btn.dataset.date;renderEmployees();}));
+  $("calPrev")?.addEventListener('click',()=>{calendarMonth.setMonth(calendarMonth.getMonth()-1);renderEmployeeCalendar(employee);});
+  $("calNext")?.addEventListener('click',()=>{calendarMonth.setMonth(calendarMonth.getMonth()+1);renderEmployeeCalendar(employee);});
+}
+async function setAgendaDay(employee,date,type){
+  if(!db)return toast('Supabase não conectado.');
+  try{const r=await db.from('agenda_funcionarios').upsert({funcionario_id:employee.id,data,tipo,observacao:null,updated_at:new Date().toISOString()},{onConflict:'funcionario_id,data'}).select().single();if(r.error)throw r.error;const i=employeeAgenda.findIndex(a=>a.funcionario_id===employee.id&&a.data===date);if(i>=0)employeeAgenda[i]=r.data;else employeeAgenda.push(r.data);renderEmployees();toast(`${employee.nome}: ${agendaLabel(type)} em ${formatDateBR(date)}`);}catch(e){console.error(e);toast('Erro ao salvar a agenda. Execute o SQL da V10 no Supabase.');}
+}
+async function clearAgendaDay(employee,date){
+  if(!db)return toast('Supabase não conectado.');
+  try{const r=await db.from('agenda_funcionarios').delete().eq('funcionario_id',employee.id).eq('data',date);if(r.error)throw r.error;employeeAgenda=employeeAgenda.filter(a=>!(a.funcionario_id===employee.id&&a.data===date));renderEmployees();toast('Definição do dia removida.');}catch(e){console.error(e);toast('Erro ao limpar o dia da agenda.');}
+}
+function renderAgendaControls(employee){
+  const host=$("agendaControls");if(!host)return;
+  const date=selectedCalendarDate,type=effectiveDayType(employee.id,date),a=getAgenda(employee.id,date),p=getPoint(employee.id,date),credit=Number(employee.dias_folga_ferias||0);
+  host.innerHTML=`<div class="agenda-selected"><div><small>DIA SELECIONADO</small><strong>${formatDateBR(date)}</strong></div><div><small>SITUAÇÃO</small><strong>${agendaLabel(type)}</strong></div><div><small>LANÇAMENTO</small><strong>${p?'PONTO REGISTRADO':'SEM PONTO'}</strong></div></div><div class="agenda-buttons"><button class="secondary" data-agenda="trabalho">TRABALHO</button><button class="secondary" data-agenda="folga">FOLGA</button><button class="secondary" data-agenda="ferias">FÉRIAS</button><button class="secondary" data-agenda="feriado_trabalhado">FERIADO TRABALHADO</button><button class="secondary" data-agenda="nao_veio">NÃO VEIO</button>${a?'<button class="danger-secondary" id="clearAgenda">LIMPAR DIA</button>':''}</div><div class="credit-editor"><label>DIAS DE FOLGA/FÉRIAS DISPONÍVEIS<input id="creditDaysScreen" type="number" min="0" step="0.5" value="${credit}"></label><button class="secondary" id="saveCreditDays">SALVAR CRÉDITOS</button></div><p class="agenda-help">Você pode definir dias anteriores ou futuros. O calendário mostra folgas, férias, faltas e o saldo de cada dia trabalhado.</p>`;
+  host.querySelectorAll('[data-agenda]').forEach(btn=>btn.addEventListener('click',()=>setAgendaDay(employee,date,btn.dataset.agenda)));
+  $("clearAgenda")?.addEventListener('click',()=>clearAgendaDay(employee,date));
+  $("saveCreditDays")?.addEventListener('click',async()=>{const val=Math.max(0,Number($("creditDaysScreen").value||0));try{const r=await db.from('funcionarios').update({dias_folga_ferias:val,updated_at:new Date().toISOString()}).eq('id',employee.id);if(r.error)throw r.error;employee.dias_folga_ferias=val;renderEmployees();toast('Dias disponíveis atualizados.');}catch(e){console.error(e);toast('Erro ao salvar dias disponíveis.');}});
+}
+
 function renderEmployees() {
-  const list = $("employeeList");
-  const detail = $("employeeDetail");
-  if (!list || !detail) return;
-  const today = localDateISO();
-  const todayLabel = new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"2-digit",year:"numeric"});
-  if ($("employeeDate")) $("employeeDate").textContent = todayLabel;
-
-  list.innerHTML = employeeRows.map(e=>{
-    const p=getPoint(e.id,today);
-    const bal=(p?.tipo_dia==='nao_veio'||p?.tipo_dia==='folga_ferias') ? 0 : workedMinutes(p,e)-expectedMinutes(e,today,p?.tipo_dia||'trabalho');
-    return `<button class="employee-list-item ${e.id===selectedEmployeeId?"active":""}" type="button" data-id="${e.id}">
-      <span>${escapeHtml(e.nome)}</span><small class="${bal<0?"negative":"positive"}">${minutesToHuman(bal)}</small>
-    </button>`;
-  }).join("") || `<div class="empty-employees">Nenhum funcionário encontrado.</div>`;
-  list.querySelectorAll(".employee-list-item").forEach(b=>b.addEventListener("click",()=>{selectedEmployeeId=b.dataset.id;renderEmployees();}));
-
-  const e=employeeRows.find(x=>x.id===selectedEmployeeId);
-  if (!e) { detail.innerHTML="<p>Nenhum funcionário selecionado.</p>"; return; }
-  const p=getPoint(e.id,today);
-  const expected=expectedMinutes(e,today,p?.tipo_dia||'trabalho');
-  const worked=(p?.tipo_dia==='nao_veio'||p?.tipo_dia==='folga_ferias') ? 0 : workedMinutes(p,e);
-  const daily=(p?.tipo_dia==='folga_ferias') ? 0 : (p?.tipo_dia==='nao_veio' ? -expectedMinutes(e,today,'trabalho') : worked-expected);
-  const period=employeePeriodBalance(e.id);
-  const ledger=employeeDayLedger(e);
-  const sch=scheduleFor(e,today);
-  const statusLabel={trabalho:'DIA NORMAL',feriado_trabalhado:'FERIADO TRABALHADO',nao_veio:'NÃO VEIO',folga_ferias:'FOLGA / FÉRIAS'}[p?.tipo_dia||'trabalho'];
-
-  detail.innerHTML=`
-    <div class="employee-detail-head">
-      <div><span class="employee-tag">ATIVO</span><h1>${escapeHtml(e.nome)}</h1></div>
-      <button class="secondary" id="editScheduleBtn">ALTERAR HORÁRIOS</button>
-    </div>
-    <div class="schedule-summary">
-      <div><b>HORÁRIO DE TRABALHO</b><span>Seg a Sex: ${e.seg_sex_entrada||"—"} às ${e.seg_sex_saida||"—"}</span><span>Sábado: ${e.sab_entrada&&e.sab_saida?`${e.sab_entrada} às ${e.sab_saida}`:"Não trabalha"}</span></div>
-      <div><b>ALMOÇO</b><span>${e.almoco_inicio&&e.almoco_fim?`${e.almoco_inicio} às ${e.almoco_fim}`:"Sem horário de almoço"}</span></div>
-      <div><b>CARGA ESPERADA HOJE</b><span>${durationHuman(expected)}</span></div>
-    </div>
-    <div class="attendance-card">
-      <div class="section-title">REGISTRO DE HOJE <span>${today}</span></div>
-      <div class="attendance-status-line">STATUS: <strong>${statusLabel}</strong></div>
-      <div class="attendance-grid">
-        <div><small>CHEGADA</small><strong>${fmtTime(p?.chegada)}</strong></div>
-        <div><small>SAÍDA ALMOÇO</small><strong>${fmtTime(p?.saida_almoco)}</strong></div>
-        <div><small>RETORNO</small><strong>${fmtTime(p?.retorno_almoco)}</strong></div>
-        <div><small>SAÍDA</small><strong>${fmtTime(p?.saida)}</strong></div>
-      </div>
-      <button class="employee-primary" id="attendanceBtn">LANÇAR HORÁRIOS / STATUS</button>
-      <button class="secondary" id="clearAttendanceBtn">LIMPAR LANÇAMENTO DE HOJE</button>
-    </div>
-    <div class="balance-grid">
-      <div><small>HORAS TRABALHADAS</small><strong>${durationHuman(worked)}</strong></div>
-      <div><small>HORAS ESPERADAS</small><strong>${durationHuman(expected)}</strong></div>
-      <div><small>SALDO DO DIA</small><strong class="${daily<0?"negative":"positive"}">${minutesToHuman(daily)}</strong></div>
-      <div><small>SALDO NO MÊS</small><strong class="${period<0?"negative":"positive"}">${minutesToHuman(period)}</strong></div>
-    </div>
-    <div class="credit-summary">
-      <div><small>CRÉDITOS DE FOLGA/FÉRIAS DISPONÍVEIS</small><strong>${ledger.remainingCredits.toFixed(2)}</strong></div>
-      <div><small>FERIADOS TRABALHADOS</small><strong>${ledger.holidayCredits}</strong></div>
-      <div><small>CRÉDITOS DE HORAS CONVERTIDOS EM DIAS</small><strong>${ledger.hourCreditsDays.toFixed(2)}</strong></div>
-      <div><small>DIAS FALTADOS A COMPENSAR</small><strong class="${ledger.daysMissing>0?"negative":"positive"}">${ledger.daysMissing}</strong></div>
-    </div>
-    <div class="schedule-note-display">${escapeHtml(e.observacao||"")}</div>
-  `;
-  $("attendanceBtn")?.addEventListener("click",()=>openAttendanceModal(e));
-  $("clearAttendanceBtn")?.addEventListener("click",()=>clearAttendance(e));
-  $("historyBtn")?.addEventListener("click",()=>openEmployeeHistory(e));
-  $("editScheduleBtn")?.addEventListener("click",()=>openScheduleModal(e));
+  const list=$("employeeList"),detail=$("employeeDetail");if(!list||!detail)return;
+  const today=localDateISO();if($("employeeDate"))$("employeeDate").textContent=new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"2-digit",year:"numeric"});
+  list.innerHTML=employeeRows.map(e=>{const type=effectiveDayType(e.id,today),p=getPoint(e.id,today),bal=type==='trabalho'?workedMinutes(p,e)-expectedMinutes(e,today,'trabalho'):(type==='feriado_trabalhado'?workedMinutes(p,e):0);return `<button class="employee-list-item ${e.id===selectedEmployeeId?'active':''}" type="button" data-id="${e.id}"><span>${escapeHtml(e.nome)}</span><small class="${bal<0?'negative':'positive'}">${type==='trabalho'&&p?minutesToHuman(bal):agendaLabel(type)}</small></button>`;}).join('')||'<div class="empty-employees">Nenhum funcionário encontrado.</div>';
+  list.querySelectorAll('.employee-list-item').forEach(b=>b.addEventListener('click',()=>{selectedEmployeeId=b.dataset.id;calendarMonth=new Date();selectedCalendarDate=localDateISO();renderEmployees();}));
+  const e=employeeRows.find(x=>x.id===selectedEmployeeId);if(!e){detail.innerHTML='<p>Nenhum funcionário selecionado.</p>';return;}
+  const viewDate=selectedCalendarDate||today, type=effectiveDayType(e.id,viewDate),p=getPoint(e.id,viewDate),expected=expectedMinutes(e,viewDate,'trabalho'),worked=(type==='trabalho'||type==='feriado_trabalhado')?workedMinutes(p,e):0,daily=type==='folga'||type==='ferias'?0:(type==='nao_veio'?-expected:(type==='feriado_trabalhado'?worked:worked-expected)),period=employeePeriodBalance(e.id),ledger=employeeDayLedger(e);
+  detail.innerHTML=`<div class="employee-detail-head"><div><span class="employee-tag">ATIVO</span><h1>${escapeHtml(e.nome)}</h1></div><div class="employee-head-actions"><button class="secondary" id="historyBtn">HISTÓRICO</button><button class="secondary" id="editScheduleBtn">ALTERAR HORÁRIOS</button></div></div><div class="schedule-summary"><div><b>HORÁRIO DE TRABALHO</b><span>Seg a Sex: ${e.seg_sex_entrada||'—'} às ${e.seg_sex_saida||'—'}</span><span>Sábado: ${e.sab_entrada&&e.sab_saida?`${e.sab_entrada} às ${e.sab_saida}`:'Não trabalha'}</span></div><div><b>ALMOÇO</b><span>${e.almoco_inicio&&e.almoco_fim?`${e.almoco_inicio} às ${e.almoco_fim}`:'Sem horário de almoço'}</span></div><div><b>CARGA ESPERADA HOJE</b><span>${durationHuman(expected)}</span></div></div><div class="agenda-card"><div class="section-title">AGENDA DO FUNCIONÁRIO</div><div id="employeeCalendar" class="employee-calendar"></div><div id="agendaControls"></div></div><div class="attendance-card"><div class="section-title">REGISTRO DE HORÁRIOS <span>${formatDateBR(viewDate)}</span></div><div class="attendance-status-line">STATUS DO DIA: <strong>${agendaLabel(type)}</strong></div><div class="attendance-grid"><div><small>CHEGADA</small><strong>${fmtTime(p?.chegada)}</strong></div><div><small>SAÍDA ALMOÇO</small><strong>${fmtTime(p?.saida_almoco)}</strong></div><div><small>RETORNO</small><strong>${fmtTime(p?.retorno_almoco)}</strong></div><div><small>SAÍDA</small><strong>${fmtTime(p?.saida)}</strong></div></div><button class="employee-primary" id="attendanceBtn">LANÇAR HORÁRIOS</button><button class="secondary" id="clearAttendanceBtn">LIMPAR LANÇAMENTO DO DIA</button></div><div class="balance-grid"><div><small>HORAS TRABALHADAS</small><strong>${durationHuman(worked)}</strong></div><div><small>HORAS ESPERADAS</small><strong>${durationHuman(expected)}</strong></div><div><small>SALDO DO DIA</small><strong class="${daily<0?'negative':'positive'}">${minutesToHuman(daily)}</strong></div><div><small>SALDO NO MÊS</small><strong class="${period<0?'negative':'positive'}">${minutesToHuman(period)}</strong></div></div><div class="credit-summary"><div><small>DIAS DISPONÍVEIS</small><strong>${ledger.remainingCredits.toFixed(2)}</strong></div><div><small>FERIADOS TRABALHADOS</small><strong>${ledger.holidayCredits}</strong></div><div><small>HORAS EM CRÉDITO</small><strong>${ledger.hourCreditsDays.toFixed(2)} dia</strong></div><div><small>DIAS A COMPENSAR</small><strong class="${ledger.daysMissing>0?'negative':'positive'}">${ledger.daysMissing.toFixed(2)}</strong></div></div><div class="schedule-note-display">${escapeHtml(e.observacao||'')}</div>`;
+  renderEmployeeCalendar(e);renderAgendaControls(e);$("attendanceBtn")?.addEventListener('click',()=>openAttendanceModal(e));$("clearAttendanceBtn")?.addEventListener('click',()=>clearAttendance(e,viewDate));$("historyBtn")?.addEventListener('click',()=>openEmployeeHistory(e));$("editScheduleBtn")?.addEventListener('click',()=>openScheduleModal(e));
 }
 
 function historyStatusLabel(type){
@@ -673,7 +667,7 @@ function renderEmployeeHistory(employee,start,end){
 }
 
 function openAttendanceModal(employee) {
-  const date = localDateISO();
+  const date = selectedCalendarDate || localDateISO();
   const p = getPoint(employee.id, date);
   $("attendanceEmployeeId").value = employee.id;
   $("attendanceEmployeeName").textContent = employee.nome;
@@ -682,11 +676,9 @@ function openAttendanceModal(employee) {
   $("attendanceLunchOut").value = fmtInputTime(p?.saida_almoco);
   $("attendanceLunchIn").value = fmtInputTime(p?.retorno_almoco);
   $("attendanceDeparture").value = fmtInputTime(p?.saida);
-  $("attendanceStatus").value = p?.tipo_dia || 'trabalho';
-  $("attendanceCreditDays").value = Number(employee.dias_folga_ferias || 0);
   const hasLunch = !!(employee.almoco_inicio && employee.almoco_fim);
   $("attendanceLunchFields").classList.toggle("hidden", !hasLunch);
-  $("attendanceModalHelp").textContent = "Digite somente o que você tiver anotado. Você pode salvar apenas a chegada e completar o restante depois. Escolha também o tipo do dia quando for feriado, falta ou folga/férias.";
+  $("attendanceModalHelp").textContent = "Digite somente os horários que você tiver anotado. O tipo do dia é definido na Agenda, fora deste lançamento.";
   $("attendanceModal").classList.remove("hidden");
   setTimeout(() => $("attendanceDate")?.focus(), 50);
 }
@@ -721,8 +713,7 @@ async function saveAttendanceManual() {
   const lunchOut = $("attendanceLunchOut").value;
   const lunchIn = $("attendanceLunchIn").value;
   const departure = $("attendanceDeparture").value;
-  const tipo = $("attendanceStatus").value || 'trabalho';
-  const manualDays = Math.max(0, Number($("attendanceCreditDays").value || 0));
+  const tipo = effectiveDayType(employee.id,date);
   const hasLunch = !!(employee.almoco_inicio && employee.almoco_fim);
   if (!date) return toast("Escolha a data.");
   if (tipo === 'trabalho' || tipo === 'feriado_trabalhado') {
@@ -748,8 +739,6 @@ async function saveAttendanceManual() {
   try {
     const result = await db.from("pontos_funcionarios").upsert(payload, { onConflict: "funcionario_id,data" }).select().single();
     if (result.error) throw result.error;
-    const empUpdate = await db.from("funcionarios").update({dias_folga_ferias:manualDays,updated_at:new Date().toISOString()}).eq("id",employee.id);
-    if (empUpdate.error) throw empUpdate.error;
     closeAttendanceModal();
     await loadEmployees({silent:true});
     toast(`${employee.nome}: lançamento salvo.`);
@@ -759,10 +748,10 @@ async function saveAttendanceManual() {
   }
 }
 
-async function clearAttendance(employee) {
-  if(!confirm(`Limpar o ponto de hoje de ${employee.nome}?`)) return;
+async function clearAttendance(employee, date=selectedCalendarDate||localDateISO()) {
+  if(!confirm(`Limpar o ponto de ${formatDateBR(date)} de ${employee.nome}?`)) return;
   try {
-    const r=await db.from("pontos_funcionarios").delete().eq("funcionario_id",employee.id).eq("data",localDateISO());
+    const r=await db.from("pontos_funcionarios").delete().eq("funcionario_id",employee.id).eq("data",date);
     if(r.error) throw r.error;
     await loadEmployees({silent:true});
     toast("Ponto de hoje apagado.");
