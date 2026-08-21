@@ -90,3 +90,7 @@ A aba Funcionários agora possui histórico por funcionário, filtro por períod
 - Permite navegar por meses anteriores e futuros.
 - Permite informar dias já devidos/faltas anteriores.
 - Execute `agenda_update_v11.sql` uma única vez no Supabase antes de usar a agenda/saldos.
+
+
+## V11.4
+Correção do salvamento dos tipos da agenda: o valor selecionado agora é enviado corretamente como `tipo`.

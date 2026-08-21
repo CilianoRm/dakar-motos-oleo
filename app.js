@@ -589,7 +589,7 @@ function renderEmployeeCalendar(employee){
 }
 async function setAgendaDay(employee,date,type){
   if(!db)return toast('Supabase não conectado.');
-  try{const r=await db.from('agenda_funcionarios').upsert({funcionario_id:employee.id,data:date,tipo,observacao:null,updated_at:new Date().toISOString()},{onConflict:'funcionario_id,data'}).select().single();if(r.error)throw r.error;const i=employeeAgenda.findIndex(a=>a.funcionario_id===employee.id&&a.data===date);if(i>=0)employeeAgenda[i]=r.data;else employeeAgenda.push(r.data);renderEmployees();toast(`${employee.nome}: ${agendaLabel(type)} em ${formatDateBR(date)}`);}catch(e){console.error(e);toast('Erro ao salvar a agenda. Execute o SQL da V11 no Supabase.');}
+  try{const r=await db.from('agenda_funcionarios').upsert({funcionario_id:employee.id,data:date,tipo:type,observacao:null,updated_at:new Date().toISOString()},{onConflict:'funcionario_id,data'}).select().single();if(r.error)throw r.error;const i=employeeAgenda.findIndex(a=>a.funcionario_id===employee.id&&a.data===date);if(i>=0)employeeAgenda[i]=r.data;else employeeAgenda.push(r.data);renderEmployees();toast(`${employee.nome}: ${agendaLabel(type)} em ${formatDateBR(date)}`);}catch(e){console.error(e);toast('Erro ao salvar a agenda: ' + (e?.message || 'verifique o Supabase.'));}
 }
 async function clearAgendaDay(employee,date){
   if(!db)return toast('Supabase não conectado.');
