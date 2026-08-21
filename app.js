@@ -553,14 +553,15 @@ function employeeDayLedger(employee){
     else { const bal=workedMinutes(p,employee,new Date())-dailyExpected; if(bal>0) workedExtra += bal; }
   }
   const manualDays = Math.max(0, Number(employee.dias_folga_ferias || 0));
+  // dias_devidos é o saldo acumulado de dias devidos, incluindo faltas
+  // já lançadas pela agenda. A falta do dia não é somada novamente aqui.
   const manualDebtDays = Math.max(0, Number(employee.dias_devidos || 0));
   const dailyBase = Math.max(1, expectedMinutes(employee, localDateISO(),'trabalho'));
   const hourCreditsDays = workedExtra / dailyBase;
   const totalCreditDays = manualDays + holidayCredits + hourCreditsDays;
   const remainingCredits = Math.max(0, totalCreditDays - usedLeave);
-  const absenceDays = absenceMinutes / dailyBase;
-  const daysMissing = Math.max(0, absenceDays + manualDebtDays - totalCreditDays);
-  const totalDebtDays = manualDebtDays + absenceDays;
+  const daysMissing = Math.max(0, manualDebtDays - totalCreditDays);
+  const totalDebtDays = manualDebtDays;
   return {absenceMinutes,absenceDays,holidayCredits,usedLeave,manualDays,manualDebtDays,workedExtra,hourCreditsDays,totalCreditDays,remainingCredits,totalDebtDays,daysMissing};
 }
 
@@ -589,11 +590,48 @@ function renderEmployeeCalendar(employee){
 }
 async function setAgendaDay(employee,date,type){
   if(!db)return toast('Supabase não conectado.');
-  try{const r=await db.from('agenda_funcionarios').upsert({funcionario_id:employee.id,data:date,tipo:type,observacao:null,updated_at:new Date().toISOString()},{onConflict:'funcionario_id,data'}).select().single();if(r.error)throw r.error;const i=employeeAgenda.findIndex(a=>a.funcionario_id===employee.id&&a.data===date);if(i>=0)employeeAgenda[i]=r.data;else employeeAgenda.push(r.data);renderEmployees();toast(`${employee.nome}: ${agendaLabel(type)} em ${formatDateBR(date)}`);}catch(e){console.error(e);toast('Erro ao salvar a agenda: ' + (e?.message || 'verifique o Supabase.'));}
+  try{
+    const previous = getAgenda(employee.id,date)?.tipo || null;
+    const wasAbsence = previous === 'nao_veio';
+    const willBeAbsence = type === 'nao_veio';
+
+    const r=await db.from('agenda_funcionarios').upsert({funcionario_id:employee.id,data:date,tipo:type,observacao:null,updated_at:new Date().toISOString()},{onConflict:'funcionario_id,data'}).select().single();
+    if(r.error)throw r.error;
+
+    // Cada dia marcado como NÃO VEIO entra no saldo acumulado de dias devidos.
+    // Se o mesmo dia já era falta, não soma novamente. Se a falta for alterada
+    // para outro tipo, devolve 1 dia ao saldo anterior.
+    if(willBeAbsence !== wasAbsence){
+      const currentDebt = Math.max(0, Number(employee.dias_devidos || 0));
+      const nextDebt = Math.max(0, currentDebt + (willBeAbsence ? 1 : -1));
+      const u = await db.from('funcionarios').update({dias_devidos:nextDebt,updated_at:new Date().toISOString()}).eq('id',employee.id);
+      if(u.error) throw u.error;
+      employee.dias_devidos = nextDebt;
+    }
+
+    const i=employeeAgenda.findIndex(a=>a.funcionario_id===employee.id&&a.data===date);
+    if(i>=0)employeeAgenda[i]=r.data;else employeeAgenda.push(r.data);
+    renderEmployees();
+    toast(`${employee.nome}: ${agendaLabel(type)} em ${formatDateBR(date)}${willBeAbsence && !wasAbsence ? ' • +1 dia devido' : (!willBeAbsence && wasAbsence ? ' • -1 dia devido' : '')}`);
+  }catch(e){console.error(e);toast('Erro ao salvar a agenda: ' + (e?.message || 'verifique o Supabase.'));}
 }
 async function clearAgendaDay(employee,date){
   if(!db)return toast('Supabase não conectado.');
-  try{const r=await db.from('agenda_funcionarios').delete().eq('funcionario_id',employee.id).eq('data',date);if(r.error)throw r.error;employeeAgenda=employeeAgenda.filter(a=>!(a.funcionario_id===employee.id&&a.data===date));renderEmployees();toast('Definição do dia removida.');}catch(e){console.error(e);toast('Erro ao limpar o dia da agenda.');}
+  try{
+    const previous = getAgenda(employee.id,date)?.tipo || null;
+    const r=await db.from('agenda_funcionarios').delete().eq('funcionario_id',employee.id).eq('data',date);
+    if(r.error)throw r.error;
+    if(previous === 'nao_veio'){
+      const currentDebt = Math.max(0, Number(employee.dias_devidos || 0));
+      const nextDebt = Math.max(0, currentDebt - 1);
+      const u = await db.from('funcionarios').update({dias_devidos:nextDebt,updated_at:new Date().toISOString()}).eq('id',employee.id);
+      if(u.error)throw u.error;
+      employee.dias_devidos = nextDebt;
+    }
+    employeeAgenda=employeeAgenda.filter(a=>!(a.funcionario_id===employee.id&&a.data===date));
+    renderEmployees();
+    toast(`Definição do dia removida.${previous === 'nao_veio' ? ' • -1 dia devido' : ''}`);
+  }catch(e){console.error(e);toast('Erro ao limpar o dia da agenda.');}
 }
 function renderAgendaControls(employee){
   const host=$("agendaControls");if(!host)return;
