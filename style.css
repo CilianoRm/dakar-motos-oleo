@@ -36,3 +36,6 @@
 
 /* V11 — agenda retrátil e saldo inicial de dias devidos */
 .agenda-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;background:transparent;color:#fff;border:0;cursor:pointer;padding:2px 0;font:inherit;font-weight:900;text-align:left}.agenda-toggle span:last-child{width:32px;height:32px;display:grid;place-items:center;border:1px solid #555;border-radius:8px;font-size:22px}.agenda-body{margin-top:12px}.agenda-body.collapsed{display:none}.credit-editor{display:grid;grid-template-columns:1fr 1fr auto;align-items:end}.credit-editor label{min-width:0}.credit-editor button{height:46px}@media(max-width:900px){.credit-editor{grid-template-columns:1fr}.credit-editor button{width:100%}}
+
+/* V11.3 — resumo da agenda retrátil */
+.agenda-summary-text{font-size:11px;color:#999;font-weight:700;margin-left:10px}.agenda-summary-text:empty{display:none}
