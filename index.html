@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Dakar Motos — Controle de Troca de Óleo</title>
-<link rel="stylesheet" href="style.css?v=11.4">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body><div class="app">
 <header><div class="brand"><img src="logo-dakar.jpg" alt="Dakar Motos"></div><div class="header-title">CONTROLE DE TROCA DE ÓLEO</div><div class="clock" id="clock"></div><button class="menu-btn" id="menuBtn" aria-label="Abrir menu">☰</button></header>
@@ -26,7 +26,7 @@
 <div class="divider"></div><div class="section-title center small">REGISTRAR AÇÃO</div>
 <div class="actions">
 <button class="action oil" id="oilBtn"><span class="action-label">TROCOU ÓLEO</span></button>
-<button class="action busy" id="busyBtn"><span class="action-label">DIMINUIR 1 TROCA</span></button>
+<button class="action busy" id="busyBtn"><span class="action-label">OCUPADO</span></button>
 </div>
 
 <div class="hint">TROCOU ÓLEO registra +1. OCUPADO abre a correção e diminui 1 troca do mecânico escolhido.</div>
@@ -53,6 +53,7 @@
     <button class="menu-option disabled-menu" type="button"><span>▣</span> AGENDAMENTOS SERVIÇOS <small>EM BREVE</small></button>
     <button class="menu-option disabled-menu" type="button"><span>☆</span> AVALIAÇÕES <small>EM BREVE</small></button>
     <button class="menu-option" id="employeesMenu" type="button"><span>♙</span> FUNCIONÁRIOS <b>›</b></button>
+    <button class="menu-option" id="mechanicsMenu" type="button"><span>⚙</span> MECÂNICOS <b>›</b></button>
   </div>
 </div>
 
@@ -86,6 +87,25 @@
 
     <section class="employee-detail card">
       <div id="employeeDetail"></div>
+    </section>
+  </div>
+</main>
+
+<!-- TELA MECÂNICOS -->
+<main id="mechanicsView" class="employees-view hidden">
+  <div class="employees-topbar">
+    <div class="employee-brand"><img src="logo-dakar.jpg" alt="Dakar Motos"></div>
+    <div class="employees-title">MECÂNICOS</div>
+    <div class="employee-date" id="mechanicDate"></div>
+    <button class="secondary" id="mechanicsBack">← VOLTAR</button>
+  </div>
+  <div class="employees-layout mechanics-layout">
+    <aside class="employee-list card">
+      <div class="section-title">MECÂNICOS</div>
+      <div id="mechanicList"></div>
+    </aside>
+    <section class="employee-detail card">
+      <div id="mechanicDetail"></div>
     </section>
   </div>
 </main>
@@ -163,5 +183,5 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=11.4"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=12"></script>
 </body></html>

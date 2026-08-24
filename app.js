@@ -282,6 +282,7 @@ function subscribe() {
     .on("postgres_changes", { event:"*", schema:"public", table:"funcionarios" }, () => loadEmployees({silent:true}))
     .on("postgres_changes", { event:"*", schema:"public", table:"pontos_funcionarios" }, () => loadEmployees({silent:true}))
     .on("postgres_changes", { event:"*", schema:"public", table:"agenda_funcionarios" }, () => loadEmployees({silent:true}))
+    .on("postgres_changes", { event:"*", schema:"public", table:"agenda_mecanicos" }, () => loadMechanicsAgenda({silent:true}))
     .subscribe(status => {
       console.log("Dakar Motos Realtime:", status);
     });
@@ -394,6 +395,10 @@ let employeeRows = [];
 let employeePoints = [];
 let selectedEmployeeId = "CILIANO";
 let employeeChannel = null;
+let mechanicAgendaRows = [];
+let selectedMechanicName = MECHANICS[0];
+let mechanicCalendarMonth = new Date();
+let selectedMechanicDate = localDateISO();
 
 function localDateISO(date = new Date()) {
   const d = new Date(date);
@@ -469,10 +474,11 @@ function workedMinutes(point, employee, now = new Date()) {
     const end = point.saida ? make(point.saida) : (date === localDateISO() ? now.getTime() : null);
     if (end && end >= start) total += (end-start)/60000;
   }
+  // Só descontamos o intervalo do almoço quando os dois horários existem.
+  // Assim, um lançamento parcial (por exemplo, apenas a saída para almoço)
+  // permanece válido e pode ser completado depois sem inventar a duração do intervalo.
   if (point.saida_almoco && point.retorno_almoco) {
     total -= Math.max(0,(make(point.retorno_almoco)-make(point.saida_almoco))/60000);
-  } else if (point.saida_almoco && !point.retorno_almoco && point.saida) {
-    total -= Math.max(0,(make(point.saida)-make(point.saida_almoco))/60000);
   }
   return Math.max(0,total);
 }
@@ -514,6 +520,7 @@ async function loadEmployees({silent=false}={}) {
     employeeAgenda = agenda.data || [];
     if (!employeeRows.some(e=>e.id===selectedEmployeeId)) selectedEmployeeId = employeeRows[0]?.id || "";
     renderEmployees();
+    await loadMechanicsAgenda({silent:true});
   } catch(error) {
     console.error("Funcionários — erro ao carregar:",error);
     if (!silent) toast("Não foi possível carregar Funcionários. Execute employee_schema.sql no Supabase.");
@@ -553,14 +560,15 @@ function employeeDayLedger(employee){
     else { const bal=workedMinutes(p,employee,new Date())-dailyExpected; if(bal>0) workedExtra += bal; }
   }
   const manualDays = Math.max(0, Number(employee.dias_folga_ferias || 0));
+  // dias_devidos é o saldo acumulado de dias devidos, incluindo faltas
+  // já lançadas pela agenda. A falta do dia não é somada novamente aqui.
   const manualDebtDays = Math.max(0, Number(employee.dias_devidos || 0));
   const dailyBase = Math.max(1, expectedMinutes(employee, localDateISO(),'trabalho'));
   const hourCreditsDays = workedExtra / dailyBase;
   const totalCreditDays = manualDays + holidayCredits + hourCreditsDays;
   const remainingCredits = Math.max(0, totalCreditDays - usedLeave);
-  const absenceDays = absenceMinutes / dailyBase;
-  const daysMissing = Math.max(0, absenceDays + manualDebtDays - totalCreditDays);
-  const totalDebtDays = manualDebtDays + absenceDays;
+  const daysMissing = Math.max(0, manualDebtDays - totalCreditDays);
+  const totalDebtDays = manualDebtDays;
   return {absenceMinutes,absenceDays,holidayCredits,usedLeave,manualDays,manualDebtDays,workedExtra,hourCreditsDays,totalCreditDays,remainingCredits,totalDebtDays,daysMissing};
 }
 
@@ -589,11 +597,48 @@ function renderEmployeeCalendar(employee){
 }
 async function setAgendaDay(employee,date,type){
   if(!db)return toast('Supabase não conectado.');
-  try{const r=await db.from('agenda_funcionarios').upsert({funcionario_id:employee.id,data:date,tipo:type,observacao:null,updated_at:new Date().toISOString()},{onConflict:'funcionario_id,data'}).select().single();if(r.error)throw r.error;const i=employeeAgenda.findIndex(a=>a.funcionario_id===employee.id&&a.data===date);if(i>=0)employeeAgenda[i]=r.data;else employeeAgenda.push(r.data);renderEmployees();toast(`${employee.nome}: ${agendaLabel(type)} em ${formatDateBR(date)}`);}catch(e){console.error(e);toast('Erro ao salvar a agenda: ' + (e?.message || 'verifique o Supabase.'));}
+  try{
+    const previous = getAgenda(employee.id,date)?.tipo || null;
+    const wasAbsence = previous === 'nao_veio';
+    const willBeAbsence = type === 'nao_veio';
+
+    const r=await db.from('agenda_funcionarios').upsert({funcionario_id:employee.id,data:date,tipo:type,observacao:null,updated_at:new Date().toISOString()},{onConflict:'funcionario_id,data'}).select().single();
+    if(r.error)throw r.error;
+
+    // Cada dia marcado como NÃO VEIO entra no saldo acumulado de dias devidos.
+    // Se o mesmo dia já era falta, não soma novamente. Se a falta for alterada
+    // para outro tipo, devolve 1 dia ao saldo anterior.
+    if(willBeAbsence !== wasAbsence){
+      const currentDebt = Math.max(0, Number(employee.dias_devidos || 0));
+      const nextDebt = Math.max(0, currentDebt + (willBeAbsence ? 1 : -1));
+      const u = await db.from('funcionarios').update({dias_devidos:nextDebt,updated_at:new Date().toISOString()}).eq('id',employee.id);
+      if(u.error) throw u.error;
+      employee.dias_devidos = nextDebt;
+    }
+
+    const i=employeeAgenda.findIndex(a=>a.funcionario_id===employee.id&&a.data===date);
+    if(i>=0)employeeAgenda[i]=r.data;else employeeAgenda.push(r.data);
+    renderEmployees();
+    toast(`${employee.nome}: ${agendaLabel(type)} em ${formatDateBR(date)}${willBeAbsence && !wasAbsence ? ' • +1 dia devido' : (!willBeAbsence && wasAbsence ? ' • -1 dia devido' : '')}`);
+  }catch(e){console.error(e);toast('Erro ao salvar a agenda: ' + (e?.message || 'verifique o Supabase.'));}
 }
 async function clearAgendaDay(employee,date){
   if(!db)return toast('Supabase não conectado.');
-  try{const r=await db.from('agenda_funcionarios').delete().eq('funcionario_id',employee.id).eq('data',date);if(r.error)throw r.error;employeeAgenda=employeeAgenda.filter(a=>!(a.funcionario_id===employee.id&&a.data===date));renderEmployees();toast('Definição do dia removida.');}catch(e){console.error(e);toast('Erro ao limpar o dia da agenda.');}
+  try{
+    const previous = getAgenda(employee.id,date)?.tipo || null;
+    const r=await db.from('agenda_funcionarios').delete().eq('funcionario_id',employee.id).eq('data',date);
+    if(r.error)throw r.error;
+    if(previous === 'nao_veio'){
+      const currentDebt = Math.max(0, Number(employee.dias_devidos || 0));
+      const nextDebt = Math.max(0, currentDebt - 1);
+      const u = await db.from('funcionarios').update({dias_devidos:nextDebt,updated_at:new Date().toISOString()}).eq('id',employee.id);
+      if(u.error)throw u.error;
+      employee.dias_devidos = nextDebt;
+    }
+    employeeAgenda=employeeAgenda.filter(a=>!(a.funcionario_id===employee.id&&a.data===date));
+    renderEmployees();
+    toast(`Definição do dia removida.${previous === 'nao_veio' ? ' • -1 dia devido' : ''}`);
+  }catch(e){console.error(e);toast('Erro ao limpar o dia da agenda.');}
 }
 function renderAgendaControls(employee){
   const host=$("agendaControls");if(!host)return;
@@ -603,6 +648,14 @@ function renderAgendaControls(employee){
   $("clearAgenda")?.addEventListener('click',()=>clearAgendaDay(employee,date));
   $("saveCreditsAndDebt")?.addEventListener('click',async()=>{const val=Math.max(0,Number($("creditDaysScreen").value||0)),debtVal=Math.max(0,Number($("debtDaysScreen").value||0));try{const r=await db.from('funcionarios').update({dias_folga_ferias:val,dias_devidos:debtVal,updated_at:new Date().toISOString()}).eq('id',employee.id);if(r.error)throw r.error;employee.dias_folga_ferias=val;employee.dias_devidos=debtVal;renderEmployees();toast('Saldos de dias atualizados.');}catch(e){console.error(e);toast('Erro ao salvar saldos. Execute o SQL da V11 no Supabase.');}});
 }
+
+const MECHANIC_CALENDAR_NAMES = ["AMAURI","SAMUEL","GIL","TIAGO","TIAGUINHO"];
+function mechanicAgendaFor(name,date=selectedMechanicDate){ return mechanicAgendaRows.find(r=>r.mecanico===name&&r.data===date)||null; }
+async function loadMechanicsAgenda({silent=false}={}){ if(!db)return; try{const r=await db.from('agenda_mecanicos').select('*').order('data',{ascending:true}); if(r.error)throw r.error; mechanicAgendaRows=r.data||[]; if(!$('mechanicsView')?.classList.contains('hidden'))renderMechanics();}catch(e){console.error('Mecânicos — erro ao carregar:',e);if(!silent)toast('Não foi possível carregar a agenda dos mecânicos. Execute mechanics_agenda_v12.sql no Supabase.');} }
+function renderMechanicCalendar(name){const host=$('mechanicCalendar');if(!host)return;const y=mechanicCalendarMonth.getFullYear(),m=mechanicCalendarMonth.getMonth(),first=new Date(y,m,1),start=(first.getDay()+6)%7,daysIn=new Date(y,m+1,0).getDate(),cells=[];for(let i=0;i<start;i++)cells.push('<div class="calendar-day empty"></div>');for(let day=1;day<=daysIn;day++){const date=`${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`,a=mechanicAgendaFor(name,date),badge=a?.nao_veio?'<span class="calendar-badge absence">NÃO VEM</span>':'';cells.push(`<button type="button" class="calendar-day ${date===selectedMechanicDate?'selected':''} ${date===localDateISO()?'today':''}" data-mech-date="${date}"><b>${day}</b>${badge}</button>`);}host.innerHTML=`<div class="calendar-head"><button class="icon-btn" id="mechCalPrev">‹</button><strong>${calendarTitle(mechanicCalendarMonth)}</strong><button class="icon-btn" id="mechCalNext">›</button></div><div class="calendar-week"><span>SEG</span><span>TER</span><span>QUA</span><span>QUI</span><span>SEX</span><span>SÁB</span><span>DOM</span></div><div class="calendar-grid">${cells.join('')}</div>`;host.querySelectorAll('.calendar-day:not(.empty)').forEach(btn=>btn.addEventListener('click',()=>{selectedMechanicDate=btn.dataset.mechDate;renderMechanics();}));$('mechCalPrev')?.addEventListener('click',()=>{mechanicCalendarMonth.setMonth(mechanicCalendarMonth.getMonth()-1);renderMechanicCalendar(name);});$('mechCalNext')?.addEventListener('click',()=>{mechanicCalendarMonth.setMonth(mechanicCalendarMonth.getMonth()+1);renderMechanicCalendar(name);});}
+async function setMechanicAbsence(name,date){if(!db)return toast('Supabase não conectado.');try{const existing=mechanicAgendaFor(name,date);if(existing?.nao_veio)return toast(`${name} já está marcado como NÃO VEM em ${formatDateBR(date)}.`);const r=await db.from('agenda_mecanicos').upsert({mecanico:name,data:date,nao_veio:true,updated_at:new Date().toISOString()},{onConflict:'mecanico,data'}).select().single();if(r.error)throw r.error;const i=mechanicAgendaRows.findIndex(x=>x.mecanico===name&&x.data===date);if(i>=0)mechanicAgendaRows[i]=r.data;else mechanicAgendaRows.push(r.data);renderMechanics();toast(`${name}: NÃO VEM em ${formatDateBR(date)}.`);}catch(e){console.error(e);toast('Erro ao salvar a ausência: '+(e?.message||'verifique o Supabase.'));}}
+async function clearMechanicAbsence(name,date){if(!db)return toast('Supabase não conectado.');try{const r=await db.from('agenda_mecanicos').delete().eq('mecanico',name).eq('data',date);if(r.error)throw r.error;mechanicAgendaRows=mechanicAgendaRows.filter(x=>!(x.mecanico===name&&x.data===date));renderMechanics();toast(`Ausência de ${name} removida de ${formatDateBR(date)}.`);}catch(e){console.error(e);toast('Erro ao limpar a ausência.');}}
+function renderMechanics(){const list=$('mechanicList'),detail=$('mechanicDetail');if(!list||!detail)return;if($('mechanicDate'))$('mechanicDate').textContent=new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'});list.innerHTML=MECHANIC_CALENDAR_NAMES.map(name=>{const total=mechanicAgendaRows.filter(x=>x.mecanico===name&&x.nao_veio).length;return `<button class="employee-list-item ${name===selectedMechanicName?'active':''}" type="button" data-mech-name="${name}"><span>${name}</span><small>${total} ${total===1?'ausência':'ausências'}</small></button>`;}).join('');list.querySelectorAll('[data-mech-name]').forEach(b=>b.addEventListener('click',()=>{selectedMechanicName=b.dataset.mechName;mechanicCalendarMonth=new Date();selectedMechanicDate=localDateISO();renderMechanics();}));const name=selectedMechanicName,a=mechanicAgendaFor(name,selectedMechanicDate);detail.innerHTML=`<div class="employee-detail-head"><div><span class="employee-tag">MECÂNICO</span><h1>${name}</h1></div><div class="employee-head-actions"><button class="secondary" id="mechanicMarkAbsence">NÃO VEM NESTE DIA</button></div></div><div class="schedule-summary mechanic-summary"><div><b>DIA SELECIONADO</b><span>${formatDateBR(selectedMechanicDate)}</span></div><div><b>SITUAÇÃO</b><span>${a?.nao_veio?'NÃO VEM':'DISPONÍVEL / SEM MARCAÇÃO'}</span></div><div><b>OBJETIVO</b><span>Somente agenda de ausência</span></div></div><div class="agenda-card mechanic-agenda-card"><div class="agenda-card-title">AGENDA DO MECÂNICO</div><div id="mechanicCalendar" class="employee-calendar"></div><div class="agenda-buttons mechanic-agenda-buttons"><button class="secondary" id="mechanicMarkAbsence2">NÃO VEM</button>${a?'<button class="danger-secondary" id="mechanicClearAbsence">LIMPAR DIA</button>':''}</div><p class="agenda-help">Selecione qualquer data, inclusive futura ou passada, para anotar quando o mecânico avisar que não virá. Não há cálculo de carga horária.</p></div>`;renderMechanicCalendar(name);$('mechanicMarkAbsence')?.addEventListener('click',()=>setMechanicAbsence(name,selectedMechanicDate));$('mechanicMarkAbsence2')?.addEventListener('click',()=>setMechanicAbsence(name,selectedMechanicDate));$('mechanicClearAbsence')?.addEventListener('click',()=>clearMechanicAbsence(name,selectedMechanicDate));}
 
 function renderEmployees() {
   const list=$("employeeList"),detail=$("employeeDetail");if(!list||!detail)return;
@@ -727,7 +780,7 @@ async function saveAttendanceManual() {
   const hasLunch = !!(employee.almoco_inicio && employee.almoco_fim);
   if (!date) return toast("Escolha a data.");
   if (tipo === 'trabalho' || tipo === 'feriado_trabalhado') {
-    if (hasLunch && ((lunchOut && !lunchIn) || (!lunchOut && lunchIn))) return toast("Informe os dois horários do almoço ou deixe os dois vazios.");
+    // O almoço pode ser lançado parcialmente: saída agora e retorno depois, ou vice-versa.
   }
   // Os horários digitados são horários locais da loja (Brasil/Fortaleza).
   // O -03:00 evita que o Supabase/browser interprete 07:28 como UTC e mostre 04:28.
@@ -808,6 +861,9 @@ async function saveSchedule() {
 
 function openMenu(){ $("menuOverlay")?.classList.remove("hidden"); }
 function closeMenu(){ $("menuOverlay")?.classList.add("hidden"); }
+function openMechanicsView(){ $("menuOverlay")?.classList.add("hidden"); $("controlView")?.classList.add("hidden"); $("tvView")?.classList.add("hidden"); $("employeesView")?.classList.add("hidden"); $("mechanicsView")?.classList.remove("hidden"); mechanicCalendarMonth=new Date(); selectedMechanicDate=localDateISO(); renderMechanics(); loadMechanicsAgenda({silent:true}); }
+function closeMechanicsView(){ $("mechanicsView")?.classList.add("hidden"); $("controlView")?.classList.remove("hidden"); }
+
 function openEmployeeLogin(){
   closeMenu();
   $("employeePassword").value="";
@@ -834,6 +890,8 @@ function setupEmployeeUI(){
   $("menuClose")?.addEventListener("click",closeMenu);
   $("menuOverlay")?.addEventListener("click",e=>{if(e.target.id==="menuOverlay")closeMenu();});
   $("employeesMenu")?.addEventListener("click",openEmployeeLogin);
+  $("mechanicsMenu")?.addEventListener("click",()=>{ closeMenu(); openMechanicsView(); });
+  $("mechanicsBack")?.addEventListener("click",closeMechanicsView);
   $("employeeLoginBtn")?.addEventListener("click",employeeLogin);
   $("employeeLoginCancel")?.addEventListener("click",closeEmployeeLogin);
   $("employeePassword")?.addEventListener("keydown",e=>{if(e.key==="Enter")employeeLogin();});

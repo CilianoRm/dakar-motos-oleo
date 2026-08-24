@@ -39,3 +39,6 @@
 
 /* V11.3 — resumo da agenda retrátil */
 .agenda-summary-text{font-size:11px;color:#999;font-weight:700;margin-left:10px}.agenda-summary-text:empty{display:none}
+
+/* V12 — agenda simples dos mecânicos */
+.mechanics-layout .employee-detail{min-height:420px}.mechanic-summary{grid-template-columns:1fr 1fr 1.4fr}.agenda-card-title{font-weight:900;color:#fff;margin-bottom:12px}.mechanic-agenda-buttons{margin-top:12px}.mechanic-agenda-buttons button{flex:1 1 220px}@media(max-width:900px){.mechanic-summary{grid-template-columns:1fr}}
