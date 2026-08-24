@@ -564,6 +564,7 @@ function employeeDayLedger(employee){
   // já lançadas pela agenda. A falta do dia não é somada novamente aqui.
   const manualDebtDays = Math.max(0, Number(employee.dias_devidos || 0));
   const dailyBase = Math.max(1, expectedMinutes(employee, localDateISO(),'trabalho'));
+  const absenceDays = absenceMinutes / dailyBase;
   const hourCreditsDays = workedExtra / dailyBase;
   const totalCreditDays = manualDays + holidayCredits + hourCreditsDays;
   const remainingCredits = Math.max(0, totalCreditDays - usedLeave);
