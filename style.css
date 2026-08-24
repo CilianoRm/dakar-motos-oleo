@@ -42,3 +42,6 @@
 
 /* V12 — agenda simples dos mecânicos */
 .mechanics-layout .employee-detail{min-height:420px}.mechanic-summary{grid-template-columns:1fr 1fr 1.4fr}.agenda-card-title{font-weight:900;color:#fff;margin-bottom:12px}.mechanic-agenda-buttons{margin-top:12px}.mechanic-agenda-buttons button{flex:1 1 220px}@media(max-width:900px){.mechanic-summary{grid-template-columns:1fr}}
+
+/* V12.3 — botão para mostrar/ocultar senha */
+.password-wrap{position:relative;width:100%;margin:0 0 12px}.password-wrap input{width:100%;padding:13px 48px 13px 13px;background:#292929;color:#fff;border:1px solid #555;border-radius:9px;outline:none}.password-wrap input:focus{border-color:var(--red)}.password-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:38px;height:38px;border:0;border-radius:7px;background:transparent;color:#fff;font-size:20px;cursor:pointer}.password-toggle:hover{background:#3a3a3a}

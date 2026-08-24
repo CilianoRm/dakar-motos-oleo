@@ -886,6 +886,17 @@ function closeEmployees(){
   $("controlView")?.classList.remove("hidden");
 }
 
+function toggleEmployeePassword(){
+  const input = $("employeePassword");
+  const btn = $("employeePasswordToggle");
+  if(!input || !btn) return;
+  const showing = input.type === "text";
+  input.type = showing ? "password" : "text";
+  btn.textContent = showing ? "👁" : "🙈";
+  btn.setAttribute("aria-label", showing ? "Mostrar senha" : "Ocultar senha");
+  btn.setAttribute("title", showing ? "Mostrar senha" : "Ocultar senha");
+}
+
 function setupEmployeeUI(){
   $("menuBtn")?.addEventListener("click",openMenu);
   $("menuClose")?.addEventListener("click",closeMenu);
@@ -896,6 +907,7 @@ function setupEmployeeUI(){
   $("employeeLoginBtn")?.addEventListener("click",employeeLogin);
   $("employeeLoginCancel")?.addEventListener("click",closeEmployeeLogin);
   $("employeePassword")?.addEventListener("keydown",e=>{if(e.key==="Enter")employeeLogin();});
+  $("employeePasswordToggle")?.addEventListener("click",toggleEmployeePassword);
   $("employeesBack")?.addEventListener("click",closeEmployees);
   $("scheduleClose")?.addEventListener("click",closeScheduleModal);
   $("scheduleCancel")?.addEventListener("click",closeScheduleModal);
