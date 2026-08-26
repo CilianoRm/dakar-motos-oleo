@@ -1,96 +1,18 @@
-# DAKAR MOTOS — Atualização Supabase + Realtime
+# Dakar Motos — V13
 
-## 1. Configurar o banco
-1. Entre no Supabase e abra o projeto.
-2. SQL Editor → New query.
-3. Abra `banco.sql`, copie tudo e cole.
-4. Clique em RUN.
+## Novidades
+- **Gerenciar funcionários** dentro da aba Funcionários.
+- Adicionar funcionário informando **somente o nome**.
+- Remover funcionário sem apagar históricos, pontos ou agendas.
+- Se um funcionário removido for adicionado novamente pelo mesmo nome, o cadastro anterior é reativado.
+- Para o caso do **Rubens**, basta entrar em **GERENCIAR** e clicar em **REMOVER**.
+- **Saldo do mês corrigido:** o dia atual não entra no saldo enquanto estiver em andamento. Ele só passa a contar depois que a **SAÍDA** for lançada.
+- Dias anteriores sem saída registrada também não entram como saldo parcial.
+- O saldo do mês continua sendo exibido somente como valor positivo/negativo, por exemplo `+01:30` ou `-02:15`.
 
-O SQL cria as tabelas, permissões, Realtime e a rotina de reset diário.
+## Supabase
+Não é necessário executar SQL novo nesta versão, desde que a tabela `funcionarios` e suas políticas de INSERT/UPDATE da versão anterior já estejam configuradas.
 
-## 2. Pegar URL e chave
-Supabase → Project Settings → API.
-Pegue:
-- Project URL
-- Publishable key
-
-Não use service_role key no navegador.
-
-## 3. Configurar app.js
-Abra `app.js` e altere:
-const SUPABASE_URL="COLE_AQUI_SUA_PROJECT_URL";
-const SUPABASE_KEY="COLE_AQUI_SUA_PUBLISHABLE_KEY";
-
-## 4. GitHub
-Envie para a raiz do repositório:
-index.html
-style.css
-app.js
-logo-dakar.jpg
-banco.sql
-README.md
-
-## 5. Recursos
-- Sincronização em tempo real entre PCs/TV.
-- Seleção manual da próxima troca.
-- Marcar mecânico como disponível/ocupado.
-- Sequência automática pula ocupados quando possível.
-- Histórico compartilhado.
-- Reset diário às 18:00 no horário de Brasília (a rotina SQL agenda 21:00 UTC).
-- A TV usa ?painel=1.
-
-Observação: o reset usa pg_cron se a extensão estiver disponível no projeto Supabase. Se a extensão não estiver disponível, o restante do sistema funciona normalmente, mas o reset automático precisará ser configurado pelo agendador disponível no projeto.
-
-
-## Módulo Funcionários — V5
-
-A versão 5 adiciona um menu embutido com **Funcionários**, protegido pela senha `Marcos8904`.
-
-### Banco de dados
-
-O banco de óleo existente não precisa ser recriado. Para ativar o módulo Funcionários, execute **uma única vez** o arquivo `employee_schema.sql` no SQL Editor do Supabase. Ele cria as tabelas `funcionarios` e `pontos_funcionarios`, insere os seis funcionários e habilita Realtime/RLS.
-
-### Controle de ponto
-
-Cada funcionário pode registrar, em sequência, chegada, saída para almoço, retorno e saída. Para quem não tem almoço cadastrado, o sistema usa chegada e saída. O sistema calcula horas trabalhadas, horas esperadas, saldo do dia e saldo acumulado do mês.
-
-### Alteração de horários
-
-Dentro de Funcionários, use **ALTERAR HORÁRIOS**. As mudanças são salvas no Supabase e valem para os próximos registros; pontos antigos não são recalculados.
-
-> Observação de segurança: a senha do módulo é uma trava de interface no navegador, não um mecanismo de segurança empresarial. Para dados trabalhistas sensíveis, o ideal é futuramente migrar o acesso para autenticação do Supabase.
-
-
-## V6 — lançamento manual de horários
-O módulo Funcionários agora permite lançar manualmente data, chegada, almoço e saída. O site não registra mais automaticamente o horário atual. O employee_schema.sql não precisa ser executado novamente.
-
-## Atualização V8 — ponto manual, faltas, feriados e folgas/férias
-
-Se o banco já possui o módulo Funcionários da versão anterior, execute **uma única vez** o arquivo `employee_update_v8.sql` no Supabase SQL Editor.
-
-A nova versão permite:
-- lançar somente a chegada e completar a saída depois;
-- lançar qualquer combinação de horários sem exigir o dia completo;
-- registrar feriado trabalhado, gerando 1 dia de crédito;
-- registrar não veio trabalhar;
-- registrar folga/férias;
-- informar dias de folga/férias disponíveis por funcionário;
-- compensar faltas usando créditos de dias e horas extras;
-- alterar horários previstos sem alterar registros históricos.
-
-Para uma instalação nova, `employee_schema.sql` já contém as novas colunas.
-
-
-## V9 — Histórico de funcionários
-A aba Funcionários agora possui histórico por funcionário, filtro por período, resumo de dias trabalhados/faltas/folgas/feriados, dias com menos horas e saldo de horas. Não é necessário SQL adicional: a V9 utiliza as tabelas criadas na V8.
-
-
-## V11 — Agenda retrátil e saldo inicial
-- Agenda do funcionário começa recolhida e abre ao clicar em “AGENDA DO FUNCIONÁRIO”.
-- Permite navegar por meses anteriores e futuros.
-- Permite informar dias já devidos/faltas anteriores.
-- Execute `agenda_update_v11.sql` uma única vez no Supabase antes de usar a agenda/saldos.
-
-
-## V11.4
-Correção do salvamento dos tipos da agenda: o valor selecionado agora é enviado corretamente como `tipo`.
+## Publicação
+Substitua os arquivos do site no GitHub e faça `Ctrl+F5`.
+A versão usa `app.js?v=13.0` e `style.css?v=13.0` para evitar cache da versão anterior.

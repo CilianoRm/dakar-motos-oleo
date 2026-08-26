@@ -520,6 +520,7 @@ async function loadEmployees({silent=false}={}) {
     employeeAgenda = agenda.data || [];
     if (!employeeRows.some(e=>e.id===selectedEmployeeId)) selectedEmployeeId = employeeRows[0]?.id || "";
     renderEmployees();
+    if(!$('employeeManagerModal')?.classList.contains('hidden')) renderEmployeeManager();
     await loadMechanicsAgenda({silent:true});
   } catch(error) {
     console.error("Funcionários — erro ao carregar:",error);
@@ -536,14 +537,42 @@ function monthStartISO() {
 function employeePeriodBalance(employeeId) {
   const employee = employeeRows.find(e=>e.id===employeeId);
   if (!employee) return 0;
-  const today = new Date();
-  const ym = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
-  return employeePoints.filter(p=>p.funcionario_id===employeeId && p.data.startsWith(ym)).reduce((sum,p)=>{
-    const type = effectiveDayType(employeeId,p.data);
-    if (type === 'nao_veio' || type === 'folga_ferias' || type === 'folga' || type === 'ferias') return sum;
-    const expected = expectedMinutes(employee,p.data,type);
-    return sum + (workedMinutes(p,employee,new Date()) - expected);
-  },0);
+
+  // Saldo mensal: somente dias concluídos entram no cálculo.
+  // O dia de hoje só entra depois que a SAÍDA for lançada.
+  const today = localDateISO();
+  const d0 = new Date();
+  d0.setDate(1);
+  const firstDay = localDateISO(d0);
+  const days = dateRangeDays(firstDay, today);
+  let total = 0;
+
+  for (const date of days) {
+    const isToday = date === today;
+    const agenda = getAgenda(employeeId, date);
+    const point = getPoint(employeeId, date);
+    const type = agenda?.tipo || point?.tipo_dia || 'trabalho';
+
+    // Nunca contabiliza o dia corrente antes da saída.
+    if (isToday && !point?.saida) continue;
+
+    if (type === 'folga' || type === 'ferias' || type === 'folga_ferias') continue;
+
+    const expected = expectedMinutes(employee, date, type);
+
+    if (type === 'nao_veio') {
+      total -= expected;
+      continue;
+    }
+
+    // Trabalho/feriado só entra quando há saída registrada.
+    if (!point?.saida) continue;
+
+    const worked = workedMinutes(point, employee, new Date());
+    total += type === 'feriado_trabalhado' ? worked : (worked - expected);
+  }
+
+  return Math.round(total);
 }
 
 function employeeDayLedger(employee){
@@ -658,10 +687,72 @@ async function setMechanicAbsence(name,date){if(!db)return toast('Supabase não 
 async function clearMechanicAbsence(name,date){if(!db)return toast('Supabase não conectado.');try{const r=await db.from('agenda_mecanicos').delete().eq('mecanico',name).eq('data',date);if(r.error)throw r.error;mechanicAgendaRows=mechanicAgendaRows.filter(x=>!(x.mecanico===name&&x.data===date));renderMechanics();toast(`Ausência de ${name} removida de ${formatDateBR(date)}.`);}catch(e){console.error(e);toast('Erro ao limpar a ausência.');}}
 function renderMechanics(){const list=$('mechanicList'),detail=$('mechanicDetail');if(!list||!detail)return;if($('mechanicDate'))$('mechanicDate').textContent=new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'});list.innerHTML=MECHANIC_CALENDAR_NAMES.map(name=>{const total=mechanicAgendaRows.filter(x=>x.mecanico===name&&x.nao_veio).length;return `<button class="employee-list-item ${name===selectedMechanicName?'active':''}" type="button" data-mech-name="${name}"><span>${name}</span><small>${total} ${total===1?'ausência':'ausências'}</small></button>`;}).join('');list.querySelectorAll('[data-mech-name]').forEach(b=>b.addEventListener('click',()=>{selectedMechanicName=b.dataset.mechName;mechanicCalendarMonth=new Date();selectedMechanicDate=localDateISO();renderMechanics();}));const name=selectedMechanicName,a=mechanicAgendaFor(name,selectedMechanicDate);detail.innerHTML=`<div class="employee-detail-head"><div><span class="employee-tag">MECÂNICO</span><h1>${name}</h1></div><div class="employee-head-actions"><button class="secondary" id="mechanicMarkAbsence">NÃO VEM NESTE DIA</button></div></div><div class="schedule-summary mechanic-summary"><div><b>DIA SELECIONADO</b><span>${formatDateBR(selectedMechanicDate)}</span></div><div><b>SITUAÇÃO</b><span>${a?.nao_veio?'NÃO VEM':'DISPONÍVEL / SEM MARCAÇÃO'}</span></div><div><b>OBJETIVO</b><span>Somente agenda de ausência</span></div></div><div class="agenda-card mechanic-agenda-card"><div class="agenda-card-title">AGENDA DO MECÂNICO</div><div id="mechanicCalendar" class="employee-calendar"></div><div class="agenda-buttons mechanic-agenda-buttons"><button class="secondary" id="mechanicMarkAbsence2">NÃO VEM</button>${a?'<button class="danger-secondary" id="mechanicClearAbsence">LIMPAR DIA</button>':''}</div><p class="agenda-help">Selecione qualquer data, inclusive futura ou passada, para anotar quando o mecânico avisar que não virá. Não há cálculo de carga horária.</p></div>`;renderMechanicCalendar(name);$('mechanicMarkAbsence')?.addEventListener('click',()=>setMechanicAbsence(name,selectedMechanicDate));$('mechanicMarkAbsence2')?.addEventListener('click',()=>setMechanicAbsence(name,selectedMechanicDate));$('mechanicClearAbsence')?.addEventListener('click',()=>clearMechanicAbsence(name,selectedMechanicDate));}
 
+function makeEmployeeId(name) {
+  const base = String(name).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'FUNCIONARIO';
+  return `${base}_${Date.now()}_${Math.floor(Math.random()*1000)}`;
+}
+
+function openEmployeeManager(){
+  renderEmployeeManager();
+  $('employeeManagerModal')?.classList.remove('hidden');
+}
+function closeEmployeeManager(){ $('employeeManagerModal')?.classList.add('hidden'); }
+
+function renderEmployeeManager(){
+  const host=$('employeeManagerList');
+  if(!host) return;
+  host.innerHTML = employeeRows.map(e=>`<div class="employee-manager-row"><div><strong>${escapeHtml(e.nome)}</strong><small>ATIVO</small></div><button class="danger-secondary" type="button" data-remove-employee="${escapeHtml(e.id)}">REMOVER</button></div>`).join('') || '<p class="empty-employees">Nenhum funcionário ativo.</p>';
+  host.querySelectorAll('[data-remove-employee]').forEach(btn=>btn.addEventListener('click',()=>removeEmployee(btn.dataset.removeEmployee)));
+}
+
+async function addEmployee(){
+  const input=$('newEmployeeName');
+  const name=input?.value.trim().replace(/\s+/g,' ');
+  if(!name) return toast('Digite o nome do funcionário.');
+  if(!db) return toast('Supabase não conectado.');
+  try{
+    const existing=await db.from('funcionarios').select('id,nome,ativo').ilike('nome',name);
+    if(existing.error) throw existing.error;
+    const same=(existing.data||[])[0];
+    if(same?.ativo) return toast('Esse funcionário já está cadastrado.');
+    if(same){
+      const r=await db.from('funcionarios').update({ativo:true,updated_at:new Date().toISOString()}).eq('id',same.id);
+      if(r.error) throw r.error;
+    }else{
+      const r=await db.from('funcionarios').insert({id:makeEmployeeId(name),nome:name,ativo:true});
+      if(r.error) throw r.error;
+    }
+    input.value='';
+    await loadEmployees({silent:true});
+    renderEmployeeManager();
+    toast(`${name} adicionado à equipe.`);
+  }catch(e){
+    console.error('Erro ao adicionar funcionário:',e);
+    toast('Erro ao adicionar funcionário: '+(e?.message||'verifique o Supabase.'));
+  }
+}
+
+async function removeEmployee(id){
+  const employee=employeeRows.find(e=>e.id===id);
+  if(!employee) return;
+  if(!confirm(`Remover ${employee.nome} da equipe?\n\nOs históricos, pontos e agendas serão preservados.`)) return;
+  try{
+    const r=await db.from('funcionarios').update({ativo:false,updated_at:new Date().toISOString()}).eq('id',id);
+    if(r.error) throw r.error;
+    if(selectedEmployeeId===id) selectedEmployeeId='';
+    await loadEmployees({silent:true});
+    renderEmployeeManager();
+    toast(`${employee.nome} foi removido da equipe.`);
+  }catch(e){
+    console.error('Erro ao remover funcionário:',e);
+    toast('Erro ao remover funcionário: '+(e?.message||'verifique o Supabase.'));
+  }
+}
+
 function renderEmployees() {
   const list=$("employeeList"),detail=$("employeeDetail");if(!list||!detail)return;
   const today=localDateISO();if($("employeeDate"))$("employeeDate").textContent=new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"2-digit",year:"numeric"});
-  list.innerHTML=employeeRows.map(e=>{const type=effectiveDayType(e.id,today),p=getPoint(e.id,today),bal=type==='trabalho'?workedMinutes(p,e)-expectedMinutes(e,today,'trabalho'):(type==='feriado_trabalhado'?workedMinutes(p,e):0);return `<button class="employee-list-item ${e.id===selectedEmployeeId?'active':''}" type="button" data-id="${e.id}"><span>${escapeHtml(e.nome)}</span><small class="${bal<0?'negative':'positive'}">${type==='trabalho'&&p?minutesToHuman(bal):agendaLabel(type)}</small></button>`;}).join('')||'<div class="empty-employees">Nenhum funcionário encontrado.</div>';
+  list.innerHTML=employeeRows.map(e=>{const type=effectiveDayType(e.id,today),p=getPoint(e.id,today),completed=!!p?.saida,bal=type==='trabalho'&&completed?workedMinutes(p,e)-expectedMinutes(e,today,'trabalho'):(type==='feriado_trabalhado'&&completed?workedMinutes(p,e):0);return `<button class="employee-list-item ${e.id===selectedEmployeeId?'active':''}" type="button" data-id="${e.id}"><span>${escapeHtml(e.nome)}</span><small class="${bal<0?'negative':'positive'}">${completed?minutesToHuman(bal):agendaLabel(type)}</small></button>`;}).join('')||'<div class="empty-employees">Nenhum funcionário encontrado.</div>';
   list.querySelectorAll('.employee-list-item').forEach(b=>b.addEventListener('click',()=>{selectedEmployeeId=b.dataset.id;calendarMonth=new Date();selectedCalendarDate=localDateISO();renderEmployees();}));
   const e=employeeRows.find(x=>x.id===selectedEmployeeId);if(!e){detail.innerHTML='<p>Nenhum funcionário selecionado.</p>';return;}
   const viewDate=selectedCalendarDate||today, type=effectiveDayType(e.id,viewDate),p=getPoint(e.id,viewDate),expected=expectedMinutes(e,viewDate,'trabalho'),worked=(type==='trabalho'||type==='feriado_trabalhado')?workedMinutes(p,e):0,daily=type==='folga'||type==='ferias'?0:(type==='nao_veio'?-expected:(type==='feriado_trabalhado'?worked:worked-expected)),period=employeePeriodBalance(e.id),ledger=employeeDayLedger(e);
@@ -909,6 +1000,12 @@ function setupEmployeeUI(){
   $("employeePassword")?.addEventListener("keydown",e=>{if(e.key==="Enter")employeeLogin();});
   $("employeePasswordToggle")?.addEventListener("click",toggleEmployeePassword);
   $("employeesBack")?.addEventListener("click",closeEmployees);
+  $("manageEmployeesBtn")?.addEventListener("click",openEmployeeManager);
+  $("employeeManagerClose")?.addEventListener("click",closeEmployeeManager);
+  $("employeeManagerCancel")?.addEventListener("click",closeEmployeeManager);
+  $("employeeManagerAdd")?.addEventListener("click",addEmployee);
+  $("newEmployeeName")?.addEventListener("keydown",e=>{if(e.key==="Enter")addEmployee();});
+  $("employeeManagerModal")?.addEventListener("click",e=>{if(e.target.id==="employeeManagerModal")closeEmployeeManager();});
   $("scheduleClose")?.addEventListener("click",closeScheduleModal);
   $("scheduleCancel")?.addEventListener("click",closeScheduleModal);
   $("scheduleSave")?.addEventListener("click",saveSchedule);

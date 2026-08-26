@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Dakar Motos — Controle de Troca de Óleo</title>
-<link rel="stylesheet" href="style.css?v=12.3">
+<link rel="stylesheet" href="style.css?v=13.0">
 </head>
 <body><div class="app">
 <header><div class="brand"><img src="logo-dakar.jpg" alt="Dakar Motos"></div><div class="header-title">CONTROLE DE TROCA DE ÓLEO</div><div class="clock" id="clock"></div><button class="menu-btn" id="menuBtn" aria-label="Abrir menu">☰</button></header>
@@ -26,7 +26,7 @@
 <div class="divider"></div><div class="section-title center small">REGISTRAR AÇÃO</div>
 <div class="actions">
 <button class="action oil" id="oilBtn"><span class="action-label">TROCOU ÓLEO</span></button>
-<button class="action busy" id="busyBtn"><span class="action-label">DIMINUIR -1 TROCA</span></button>
+<button class="action busy" id="busyBtn"><span class="action-label">OCUPADO</span></button>
 </div>
 
 <div class="hint">TROCOU ÓLEO registra +1. OCUPADO abre a correção e diminui 1 troca do mecânico escolhido.</div>
@@ -81,7 +81,7 @@
 
   <div class="employees-layout">
     <aside class="employee-list card">
-      <div class="section-title">EQUIPE</div>
+      <div class="section-title"><span>EQUIPE</span><button class="secondary manage-team-btn" id="manageEmployeesBtn" type="button">GERENCIAR</button></div>
       <div id="employeeList"></div>
     </aside>
 
@@ -109,6 +109,22 @@
     </section>
   </div>
 </main>
+
+
+<!-- MODAL DE GERENCIAMENTO DA EQUIPE -->
+<div class="schedule-modal hidden" id="employeeManagerModal">
+  <div class="schedule-box employee-manager-box">
+    <div class="section-title">GERENCIAR FUNCIONÁRIOS <button class="icon-btn" id="employeeManagerClose">×</button></div>
+    <p class="modal-help">Adicione um funcionário informando somente o nome. Ao remover, os históricos, pontos e agendas são preservados.</p>
+    <div class="employee-add-row">
+      <input id="newEmployeeName" type="text" maxlength="80" placeholder="Nome do funcionário" autocomplete="off">
+      <button class="employee-primary" id="employeeManagerAdd" type="button">ADICIONAR</button>
+    </div>
+    <div class="section-title manager-list-title">FUNCIONÁRIOS ATIVOS</div>
+    <div id="employeeManagerList" class="employee-manager-list"></div>
+    <div class="modal-actions"><button class="secondary" id="employeeManagerCancel" type="button">FECHAR</button></div>
+  </div>
+</div>
 
 <!-- MODAL DE LANÇAMENTO MANUAL DE PONTO -->
 <div class="schedule-modal hidden" id="attendanceModal">
@@ -183,5 +199,5 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=12.3"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=13.0"></script>
 </body></html>
