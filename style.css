@@ -48,3 +48,12 @@
 
 /* V13 — gerenciamento de funcionários e saldo mensal somente de dias concluídos */
 .manage-team-btn{padding:8px 10px;font-size:10px;white-space:nowrap}.employee-manager-box{width:min(760px,96vw)}.employee-add-row{display:grid;grid-template-columns:1fr auto;gap:10px;margin:16px 0}.employee-add-row input{width:100%;background:#292929;color:#fff;border:1px solid #555;border-radius:8px;padding:13px;font-size:15px;outline:none}.employee-add-row input:focus{border-color:var(--red)}.employee-add-row .employee-primary{border:0;border-radius:9px;padding:12px 18px;background:var(--red);color:#fff;font-weight:900}.manager-list-title{margin-top:20px;padding-top:14px;border-top:1px solid #333}.employee-manager-list{display:grid;gap:8px}.employee-manager-row{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#242424;border:1px solid #383838;border-radius:10px;padding:11px 12px}.employee-manager-row>div{display:flex;flex-direction:column;gap:4px}.employee-manager-row small{font-size:9px;color:#70d889;font-weight:900}.employee-manager-row .danger-secondary{padding:9px 12px;font-size:11px}@media(max-width:600px){.employee-add-row{grid-template-columns:1fr}.employee-add-row .employee-primary{width:100%}.employee-manager-row{align-items:flex-start;flex-direction:column}.employee-manager-row .danger-secondary{width:100%}.manage-team-btn{font-size:9px;padding:7px 8px}}
+
+/* V14 — editor de horários individual por dia */
+.weekly-schedule-editor{margin-top:12px;border:1px solid #383838;border-radius:10px;overflow:auto;background:#202020}
+.weekly-schedule-head,.weekly-schedule-row{display:grid;grid-template-columns:1.25fr repeat(4,minmax(110px,1fr));gap:8px;align-items:center;padding:9px 10px;min-width:720px}
+.weekly-schedule-head{background:#292929;color:#aaa;font-size:10px;font-weight:900;text-transform:uppercase}
+.weekly-schedule-row{border-top:1px solid #333}
+.weekly-schedule-row b{font-size:12px;color:#fff}
+.weekly-schedule-row input{width:100%;background:#292929;color:#fff;border:1px solid #555;border-radius:7px;padding:9px}
+@media(max-width:700px){.weekly-schedule-editor{margin-left:-4px;margin-right:-4px}.weekly-schedule-head,.weekly-schedule-row{grid-template-columns:120px repeat(4,105px);min-width:650px}.weekly-schedule-row input{padding:8px}.schedule-box{max-height:92vh;overflow:auto}}

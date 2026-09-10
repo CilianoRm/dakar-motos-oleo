@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Dakar Motos — Controle de Troca de Óleo</title>
-<link rel="stylesheet" href="style.css?v=13.0">
+<link rel="stylesheet" href="style.css?v=14.0">
 </head>
 <body><div class="app">
 <header><div class="brand"><img src="logo-dakar.jpg" alt="Dakar Motos"></div><div class="header-title">CONTROLE DE TROCA DE ÓLEO</div><div class="clock" id="clock"></div><button class="menu-btn" id="menuBtn" aria-label="Abrir menu">☰</button></header>
@@ -26,10 +26,10 @@
 <div class="divider"></div><div class="section-title center small">REGISTRAR AÇÃO</div>
 <div class="actions">
 <button class="action oil" id="oilBtn"><span class="action-label">TROCOU ÓLEO</span></button>
-<button class="action busy" id="busyBtn"><span class="action-label">-1 TROCA ÓLEO</span></button>
+<button class="action busy" id="busyBtn"><span class="action-label">OCUPADO</span></button>
 </div>
 
-<div class="hint">TROCOU ÓLEO registra +1. -1 TROCA abre a correção e diminui 1 troca do mecânico escolhido.</div>
+<div class="hint">TROCOU ÓLEO registra +1. OCUPADO abre a correção e diminui 1 troca do mecânico escolhido.</div>
 <div class="panel-links"><button class="secondary" id="openPanel">ABRIR PAINEL DA TV</button><button class="secondary" id="copyPanel">COPIAR LINK DO PAINEL</button></div>
 </section>
 
@@ -149,40 +149,23 @@
   </div>
 </div>
 
-<!-- MODAL DE HISTÓRICO DO FUNCIONÁRIO -->
-<div class="schedule-modal hidden" id="employeeHistoryModal">
-  <div class="history-box">
-    <div class="section-title">HISTÓRICO DO FUNCIONÁRIO <button class="icon-btn" id="employeeHistoryClose">×</button></div>
-    <h2 id="historyEmployeeName" style="margin:8px 0 4px">Funcionário</h2>
-    <div class="history-filters">
-      <label>DATA INICIAL<input id="historyStart" type="date"></label>
-      <label>DATA FINAL<input id="historyEnd" type="date"></label>
-      <button class="secondary" id="historyApply">APLICAR</button>
-    </div>
-    <div id="historySummary" class="history-summary-grid"></div>
-    <div class="employee-history-table-wrap">
-      <table class="employee-history-table">
-        <thead><tr><th>DATA</th><th>SITUAÇÃO</th><th>ENTRADA</th><th>ALMOÇO</th><th>RETORNO</th><th>SAÍDA</th><th>TRABALHADAS</th><th>SALDO</th></tr></thead>
-        <tbody id="employeeHistoryBody"></tbody>
-      </table>
-    </div>
-  </div>
-</div>
-
 <!-- MODAL DE ALTERAÇÃO DE HORÁRIO -->
 <div class="schedule-modal hidden" id="scheduleModal">
   <div class="schedule-box">
     <div class="section-title">ALTERAR HORÁRIOS <button class="icon-btn" id="scheduleClose">×</button></div>
     <p class="modal-help">As alterações ficam salvas no banco e valem para os próximos registros. O histórico de ponto já registrado não é alterado.</p>
     <input type="hidden" id="scheduleEmployeeId">
-    <div class="schedule-grid">
-      <label>Segunda a sexta — entrada<input id="segEntrada" type="time"></label>
-      <label>Segunda a sexta — saída<input id="segSaida" type="time"></label>
-      <label>Sábado — entrada<input id="sabEntrada" type="time"></label>
-      <label>Sábado — saída<input id="sabSaida" type="time"></label>
-      <label>Almoço — saída<input id="almocoInicio" type="time"></label>
-      <label>Almoço — retorno<input id="almocoFim" type="time"></label>
+    <div class="weekly-schedule-editor">
+      <div class="weekly-schedule-head"><span>DIA</span><span>ENTRADA</span><span>SAÍDA</span><span>ALMOÇO — SAÍDA</span><span>ALMOÇO — RETORNO</span></div>
+      <div class="weekly-schedule-row"><b>SEGUNDA-FEIRA</b><input id="segEntrada" type="time"><input id="segSaida" type="time"><input id="segAlmocoInicio" type="time"><input id="segAlmocoFim" type="time"></div>
+      <div class="weekly-schedule-row"><b>TERÇA-FEIRA</b><input id="terEntrada" type="time"><input id="terSaida" type="time"><input id="terAlmocoInicio" type="time"><input id="terAlmocoFim" type="time"></div>
+      <div class="weekly-schedule-row"><b>QUARTA-FEIRA</b><input id="quaEntrada" type="time"><input id="quaSaida" type="time"><input id="quaAlmocoInicio" type="time"><input id="quaAlmocoFim" type="time"></div>
+      <div class="weekly-schedule-row"><b>QUINTA-FEIRA</b><input id="quiEntrada" type="time"><input id="quiSaida" type="time"><input id="quiAlmocoInicio" type="time"><input id="quiAlmocoFim" type="time"></div>
+      <div class="weekly-schedule-row"><b>SEXTA-FEIRA</b><input id="sexEntrada" type="time"><input id="sexSaida" type="time"><input id="sexAlmocoInicio" type="time"><input id="sexAlmocoFim" type="time"></div>
+      <div class="weekly-schedule-row"><b>SÁBADO</b><input id="sabEntrada" type="time"><input id="sabSaida" type="time"><input id="sabAlmocoInicio" type="time"><input id="sabAlmocoFim" type="time"></div>
+      <div class="weekly-schedule-row"><b>DOMINGO</b><input id="domEntrada" type="time"><input id="domSaida" type="time"><input id="domAlmocoInicio" type="time"><input id="domAlmocoFim" type="time"></div>
     </div>
+    <p class="modal-help">Deixe entrada e saída vazias nos dias em que o funcionário não trabalha. O calendário mostrará automaticamente <b>NÃO TRABALHA</b> nesses dias.</p>
     <label class="schedule-note">Observação<input id="scheduleObservation" type="text" maxlength="200"></label>
     <div class="modal-actions"><button class="secondary" id="scheduleCancel">CANCELAR</button><button class="employee-primary" id="scheduleSave">SALVAR HORÁRIOS</button></div>
   </div>
@@ -199,5 +182,5 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=13.2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=14.0"></script>
 </body></html>

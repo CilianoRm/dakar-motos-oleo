@@ -443,15 +443,37 @@ function weekdayForDate(dateStr) {
   return new Date(y,m-1,d).getDay();
 }
 
+const WEEKDAY_KEYS = [
+  {day:1,key:'seg',label:'Segunda-feira'},
+  {day:2,key:'ter',label:'Terça-feira'},
+  {day:3,key:'qua',label:'Quarta-feira'},
+  {day:4,key:'qui',label:'Quinta-feira'},
+  {day:5,key:'sex',label:'Sexta-feira'},
+  {day:6,key:'sab',label:'Sábado'},
+  {day:0,key:'dom',label:'Domingo'}
+];
+
+function scheduleForKey(employee,key) {
+  const start=employee[`${key}_entrada`] || null;
+  const end=employee[`${key}_saida`] || null;
+  if(!start || !end) return null;
+  return {start,end,lunchStart:employee[`${key}_almoco_inicio`]||null,lunchEnd:employee[`${key}_almoco_fim`]||null};
+}
+
 function scheduleFor(employee, dateStr = localDateISO()) {
   const day = weekdayForDate(dateStr);
-  if (day === 0) return null;
-  if (day === 6) {
-    if (!employee.sab_entrada || !employee.sab_saida) return null;
+  const cfg = WEEKDAY_KEYS.find(x => x.day === day);
+  if (!cfg) return null;
+  const current = scheduleForKey(employee,cfg.key);
+  if(current) return current;
+  // Compatibilidade com a estrutura antiga antes da migração V14.
+  if (cfg.key !== 'sab' && cfg.key !== 'dom' && employee.seg_sex_entrada && employee.seg_sex_saida) {
+    return { start:employee.seg_sex_entrada, end:employee.seg_sex_saida, lunchStart:employee.almoco_inicio, lunchEnd:employee.almoco_fim };
+  }
+  if (cfg.key === 'sab' && employee.sab_entrada && employee.sab_saida) {
     return { start:employee.sab_entrada, end:employee.sab_saida, lunchStart:employee.almoco_inicio, lunchEnd:employee.almoco_fim };
   }
-  if (!employee.seg_sex_entrada || !employee.seg_sex_saida) return null;
-  return { start:employee.seg_sex_entrada, end:employee.seg_sex_saida, lunchStart:employee.almoco_inicio, lunchEnd:employee.almoco_fim };
+  return null;
 }
 
 function expectedMinutes(employee, dateStr = localDateISO(), tipoDia = 'trabalho') {
@@ -598,18 +620,27 @@ function employeeDayLedger(employee){
   const today = new Date();
   const ym = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
   const rows = employeePoints.filter(p=>p.funcionario_id===employee.id && p.data.startsWith(ym));
+  const agendaRows = employeeAgenda.filter(a=>a.funcionario_id===employee.id && a.data.startsWith(ym));
   let absenceMinutes=0, holidayCredits=0, usedLeave=0, workedExtra=0;
-  for(const p of rows){
-    const type = effectiveDayType(employee.id,p.data);
-    const dailyExpected = expectedMinutes(employee,p.data,'trabalho');
+
+  // Agenda tem prioridade para o tipo do dia. Isso faz FÉRIAS/FOLGA marcadas
+  // no calendário reduzirem imediatamente os dias disponíveis.
+  const dates = new Set([...rows.map(p=>p.data), ...agendaRows.map(a=>a.data)]);
+  for(const date of dates){
+    const p = rows.find(x=>x.data===date) || null;
+    const agenda = getAgenda(employee.id,date);
+    const type = agenda?.tipo || p?.tipo_dia || 'trabalho';
+    const dailyExpected = expectedMinutes(employee,date,'trabalho');
+
     if(type==='nao_veio') absenceMinutes += dailyExpected;
     else if(type==='feriado_trabalhado') holidayCredits += 1;
     else if(type==='folga' || type==='ferias' || type==='folga_ferias') usedLeave += 1;
-    else if(p.saida) {
+    else if(p?.saida) {
       const bal=workedMinutes(p,employee,new Date())-dailyExpected;
       if(bal>0) workedExtra += bal;
     }
   }
+
   const manualDays = Math.max(0, Number(employee.dias_folga_ferias || 0));
   const manualDebtDays = Math.max(0, Number(employee.dias_devidos || 0));
   const dailyBase = employeeDailyBaseMinutes(employee);
@@ -641,8 +672,7 @@ function renderEmployeeCalendar(employee){
     else if(type==='feriado_trabalhado')badge='<span class="calendar-badge holiday">FERIADO</span>';
     else if(type==='nao_veio')badge='<span class="calendar-badge absence">FALTOU</span>';
     else if(p&&(p.chegada||p.saida))badge=`<span class="calendar-badge ${bal<0?'less':'more'}">${minutesToHuman(bal)}</span>`;
-    else if(weekdayForDate(date)===0)badge='<span class="calendar-badge weekend">DOM</span>';
-    else if(weekdayForDate(date)===6&&!scheduleFor(employee,date))badge='<span class="calendar-badge weekend">SÁB</span>';
+    else if(!scheduleFor(employee,date))badge='<span class="calendar-badge weekend">NÃO TRABALHA</span>';
     cells.push(`<button type="button" class="calendar-day ${date===selectedCalendarDate?'selected':''} ${date===localDateISO()?'today':''}" data-date="${date}"><b>${day}</b>${badge}</button>`);
   }
   host.innerHTML=`<div class="calendar-head"><button class="icon-btn" id="calPrev">‹</button><strong>${calendarTitle(calendarMonth)}</strong><button class="icon-btn" id="calNext">›</button></div><div class="calendar-week"><span>SEG</span><span>TER</span><span>QUA</span><span>QUI</span><span>SEX</span><span>SÁB</span><span>DOM</span></div><div class="calendar-grid">${cells.join('')}</div>`;
@@ -781,12 +811,12 @@ function renderEmployees() {
   list.querySelectorAll('.employee-list-item').forEach(b=>b.addEventListener('click',()=>{selectedEmployeeId=b.dataset.id;calendarMonth=new Date();selectedCalendarDate=localDateISO();renderEmployees();}));
   const e=employeeRows.find(x=>x.id===selectedEmployeeId);if(!e){detail.innerHTML='<p>Nenhum funcionário selecionado.</p>';return;}
   const viewDate=selectedCalendarDate||today, type=effectiveDayType(e.id,viewDate),p=getPoint(e.id,viewDate),expected=expectedMinutes(e,viewDate,'trabalho'),worked=(type==='trabalho'||type==='feriado_trabalhado')?workedMinutes(p,e):0,daily=type==='folga'||type==='ferias'?0:(type==='nao_veio'?-expected:(type==='feriado_trabalhado'?worked:worked-expected)),period=employeePeriodBalance(e.id),ledger=employeeDayLedger(e);
-  detail.innerHTML=`<div class="employee-detail-head"><div><span class="employee-tag">ATIVO</span><h1>${escapeHtml(e.nome)}</h1></div><div class="employee-head-actions"><button class="secondary" id="historyBtn">HISTÓRICO</button><button class="secondary" id="editScheduleBtn">ALTERAR HORÁRIOS</button></div></div><div class="schedule-summary"><div><b>HORÁRIO DE TRABALHO</b><span>Seg a Sex: ${e.seg_sex_entrada||'—'} às ${e.seg_sex_saida||'—'}</span><span>Sábado: ${e.sab_entrada&&e.sab_saida?`${e.sab_entrada} às ${e.sab_saida}`:'Não trabalha'}</span></div><div><b>ALMOÇO</b><span>${e.almoco_inicio&&e.almoco_fim?`${e.almoco_inicio} às ${e.almoco_fim}`:'Sem horário de almoço'}</span></div><div><b>CARGA ESPERADA HOJE</b><span>${durationHuman(expected)}</span></div></div><div class="agenda-card"><button type="button" class="agenda-toggle" id="agendaToggle"><span>AGENDA DO FUNCIONÁRIO <small id="agendaSummaryText" class="agenda-summary-text"></small></span><span id="agendaToggleIcon">＋</span></button><div id="agendaBody" class="agenda-body collapsed"><div id="employeeCalendar" class="employee-calendar"></div><div id="agendaControls"></div></div></div><div class="attendance-card"><div class="section-title">REGISTRO DE HORÁRIOS <span>${formatDateBR(viewDate)}</span></div><div class="attendance-status-line">STATUS DO DIA: <strong>${agendaLabel(type)}</strong></div><div class="attendance-grid"><div><small>CHEGADA</small><strong>${fmtTime(p?.chegada)}</strong></div><div><small>SAÍDA ALMOÇO</small><strong>${fmtTime(p?.saida_almoco)}</strong></div><div><small>RETORNO</small><strong>${fmtTime(p?.retorno_almoco)}</strong></div><div><small>SAÍDA</small><strong>${fmtTime(p?.saida)}</strong></div></div><button class="employee-primary" id="attendanceBtn">LANÇAR HORÁRIOS</button><button class="secondary" id="clearAttendanceBtn">LIMPAR LANÇAMENTO DO DIA</button></div><div class="balance-grid"><div><small>HORAS TRABALHADAS</small><strong>${durationHuman(worked)}</strong></div><div><small>HORAS ESPERADAS</small><strong>${durationHuman(expected)}</strong></div><div><small>SALDO DO DIA</small><strong class="${daily<0?'negative':'positive'}">${minutesToHuman(daily)}</strong></div><div><small>SALDO NO MÊS</small><strong class="${period<0?'negative':'positive'}">${minutesToHuman(period)}</strong></div></div><div class="credit-summary"><div><small>DIAS DISPONÍVEIS</small><strong class="${ledger.remainingCredits>0?'positive':''}">${ledger.remainingCredits.toFixed(2)}</strong></div><div><small>FERIADOS TRABALHADOS</small><strong>${ledger.holidayCredits}</strong></div><div><small>HORAS EM CRÉDITO</small><strong>${ledger.hourCreditsDays.toFixed(2)} dia</strong></div><div><small>DIAS JÁ DEVIDOS</small><strong class="${ledger.manualDebtDays>0?'negative':'positive'}">${ledger.manualDebtDays.toFixed(2)}</strong></div><div><small>SALDO DISPONÍVEL</small><strong class="${ledger.netAvailableDays<0?'negative':'positive'}">${signedDaysAndMinutes(ledger.netAvailableDays,ledger.dailyBase)}</strong></div></div><div class="schedule-note-display">${escapeHtml(e.observacao||'')}</div>`;
+  detail.innerHTML=`<div class="employee-detail-head"><div><span class="employee-tag">ATIVO</span><h1>${escapeHtml(e.nome)}</h1></div><div class="employee-head-actions"><button class="secondary" id="editScheduleBtn">ALTERAR HORÁRIOS</button></div></div><div class="schedule-summary"><div><b>HORÁRIOS POR DIA</b>${WEEKDAY_KEYS.map(cfg=>{const s=scheduleForKey(e,cfg.key);return `<span><strong>${cfg.label}:</strong> ${s?`${s.start.slice(0,5)} às ${s.end.slice(0,5)}`:'Não trabalha'}</span>`;}).join('')}</div><div><b>ALMOÇO DO DIA SELECIONADO</b><span>${scheduleFor(e,viewDate)?.lunchStart&&scheduleFor(e,viewDate)?.lunchEnd?`${scheduleFor(e,viewDate).lunchStart.slice(0,5)} às ${scheduleFor(e,viewDate).lunchEnd.slice(0,5)}`:'Sem horário de almoço'}</span></div><div><b>CARGA ESPERADA</b><span>${durationHuman(expected)}</span></div></div></div><div class="agenda-card"><button type="button" class="agenda-toggle" id="agendaToggle"><span>AGENDA DO FUNCIONÁRIO <small id="agendaSummaryText" class="agenda-summary-text"></small></span><span id="agendaToggleIcon">＋</span></button><div id="agendaBody" class="agenda-body collapsed"><div id="employeeCalendar" class="employee-calendar"></div><div id="agendaControls"></div></div></div><div class="attendance-card"><div class="section-title">REGISTRO DE HORÁRIOS <span>${formatDateBR(viewDate)}</span></div><div class="attendance-status-line">STATUS DO DIA: <strong>${agendaLabel(type)}</strong></div><div class="attendance-grid"><div><small>CHEGADA</small><strong>${fmtTime(p?.chegada)}</strong></div><div><small>SAÍDA ALMOÇO</small><strong>${fmtTime(p?.saida_almoco)}</strong></div><div><small>RETORNO</small><strong>${fmtTime(p?.retorno_almoco)}</strong></div><div><small>SAÍDA</small><strong>${fmtTime(p?.saida)}</strong></div></div><button class="employee-primary" id="attendanceBtn">LANÇAR HORÁRIOS</button><button class="secondary" id="clearAttendanceBtn">LIMPAR LANÇAMENTO DO DIA</button></div><div class="balance-grid"><div><small>HORAS TRABALHADAS</small><strong>${durationHuman(worked)}</strong></div><div><small>HORAS ESPERADAS</small><strong>${durationHuman(expected)}</strong></div><div><small>SALDO DO DIA</small><strong class="${daily<0?'negative':'positive'}">${minutesToHuman(daily)}</strong></div><div><small>SALDO NO MÊS</small><strong class="${period<0?'negative':'positive'}">${minutesToHuman(period)}</strong></div></div><div class="credit-summary"><div><small>DIAS DISPONÍVEIS</small><strong class="${ledger.remainingCredits>0?'positive':''}">${ledger.remainingCredits.toFixed(2)}</strong></div><div><small>FERIADOS TRABALHADOS</small><strong>${ledger.holidayCredits}</strong></div><div><small>HORAS EM CRÉDITO</small><strong>${ledger.hourCreditsDays.toFixed(2)} dia</strong></div><div><small>DIAS JÁ DEVIDOS</small><strong class="${ledger.manualDebtDays>0?'negative':'positive'}">${ledger.manualDebtDays.toFixed(2)}</strong></div><div><small>SALDO DISPONÍVEL</small><strong class="${ledger.netAvailableDays<0?'negative':'positive'}">${signedDaysAndMinutes(ledger.netAvailableDays,ledger.dailyBase)}</strong></div></div><div class="schedule-note-display">${escapeHtml(e.observacao||'')}</div>`;
   renderEmployeeCalendar(e);renderAgendaControls(e);
   const agendaBody=$("agendaBody");
   const agendaIcon=$("agendaToggleIcon");
   if(agendaBody){ agendaBody.classList.toggle("collapsed", !agendaOpenState); if(agendaIcon) agendaIcon.textContent=agendaOpenState?"−":"＋"; }
-  $("agendaToggle")?.addEventListener("click",()=>{ agendaOpenState=!agendaOpenState; const body=$("agendaBody"); if(body) body.classList.toggle("collapsed", !agendaOpenState); if($("agendaToggleIcon")) $("agendaToggleIcon").textContent=agendaOpenState?"−":"＋"; });$("attendanceBtn")?.addEventListener('click',()=>openAttendanceModal(e));$("clearAttendanceBtn")?.addEventListener('click',()=>clearAttendance(e,viewDate));$("historyBtn")?.addEventListener('click',()=>openEmployeeHistory(e));$("editScheduleBtn")?.addEventListener('click',()=>openScheduleModal(e));
+  $("agendaToggle")?.addEventListener("click",()=>{ agendaOpenState=!agendaOpenState; const body=$("agendaBody"); if(body) body.classList.toggle("collapsed", !agendaOpenState); if($("agendaToggleIcon")) $("agendaToggleIcon").textContent=agendaOpenState?"−":"＋"; });$("attendanceBtn")?.addEventListener('click',()=>openAttendanceModal(e));$("clearAttendanceBtn")?.addEventListener('click',()=>clearAttendance(e,viewDate));$("editScheduleBtn")?.addEventListener('click',()=>openScheduleModal(e));
 }
 
 function historyStatusLabel(type){
@@ -939,12 +969,17 @@ async function clearAttendance(employee, date=selectedCalendarDate||localDateISO
 
 function openScheduleModal(employee) {
   $("scheduleEmployeeId").value=employee.id;
-  $("segEntrada").value=(employee.seg_sex_entrada||"").slice(0,5);
-  $("segSaida").value=(employee.seg_sex_saida||"").slice(0,5);
-  $("sabEntrada").value=(employee.sab_entrada||"").slice(0,5);
-  $("sabSaida").value=(employee.sab_saida||"").slice(0,5);
-  $("almocoInicio").value=(employee.almoco_inicio||"").slice(0,5);
-  $("almocoFim").value=(employee.almoco_fim||"").slice(0,5);
+  for (const cfg of WEEKDAY_KEYS) {
+    const key = cfg.key;
+    const start = employee[`${key}_entrada`] || ((key !== 'sab' && key !== 'dom') ? employee.seg_sex_entrada : (key === 'sab' ? employee.sab_entrada : ''));
+    const end = employee[`${key}_saida`] || ((key !== 'sab' && key !== 'dom') ? employee.seg_sex_saida : (key === 'sab' ? employee.sab_saida : ''));
+    const lunchStart = employee[`${key}_almoco_inicio`] || ((key !== 'sab' && key !== 'dom') || key === 'sab' ? employee.almoco_inicio : '');
+    const lunchEnd = employee[`${key}_almoco_fim`] || ((key !== 'sab' && key !== 'dom') || key === 'sab' ? employee.almoco_fim : '');
+    $(`${key}Entrada`).value=(start||'').slice(0,5);
+    $(`${key}Saida`).value=(end||'').slice(0,5);
+    $(`${key}AlmocoInicio`).value=(lunchStart||'').slice(0,5);
+    $(`${key}AlmocoFim`).value=(lunchEnd||'').slice(0,5);
+  }
   $("scheduleObservation").value=employee.observacao||"";
   $("scheduleModal").classList.remove("hidden");
 }
@@ -953,26 +988,27 @@ function closeScheduleModal() { $("scheduleModal")?.classList.add("hidden"); }
 
 async function saveSchedule() {
   const id=$("scheduleEmployeeId").value;
-  const payload={
-    seg_sex_entrada:$("segEntrada").value||null,
-    seg_sex_saida:$("segSaida").value||null,
-    sab_entrada:$("sabEntrada").value||null,
-    sab_saida:$("sabSaida").value||null,
-    almoco_inicio:$("almocoInicio").value||null,
-    almoco_fim:$("almocoFim").value||null,
-    observacao:$("scheduleObservation").value.trim()||null,
-    updated_at:new Date().toISOString()
-  };
-  if((payload.seg_sex_entrada && !payload.seg_sex_saida) || (!payload.seg_sex_entrada && payload.seg_sex_saida)) return toast("Preencha entrada e saída de segunda a sexta.");
-  if((payload.sab_entrada && !payload.sab_saida) || (!payload.sab_entrada && payload.sab_saida)) return toast("Preencha entrada e saída do sábado, ou deixe os dois vazios.");
-  if((payload.almoco_inicio && !payload.almoco_fim) || (!payload.almoco_inicio && payload.almoco_fim)) return toast("Preencha início e retorno do almoço, ou deixe os dois vazios.");
+  const payload={ updated_at:new Date().toISOString(), observacao:$("scheduleObservation").value.trim()||null };
+  for (const cfg of WEEKDAY_KEYS) {
+    const key=cfg.key;
+    const entrada=$(`${key}Entrada`).value||null;
+    const saida=$(`${key}Saida`).value||null;
+    const almocoInicio=$(`${key}AlmocoInicio`).value||null;
+    const almocoFim=$(`${key}AlmocoFim`).value||null;
+    if((entrada && !saida) || (!entrada && saida)) return toast(`Preencha entrada e saída de ${cfg.label}, ou deixe os dois vazios.`);
+    if((almocoInicio && !almocoFim) || (!almocoInicio && almocoFim)) return toast(`Preencha o almoço de ${cfg.label} ou deixe os dois vazios.`);
+    payload[`${key}_entrada`]=entrada;
+    payload[`${key}_saida`]=saida;
+    payload[`${key}_almoco_inicio`]=almocoInicio;
+    payload[`${key}_almoco_fim`]=almocoFim;
+  }
   try {
     const r=await db.from("funcionarios").update(payload).eq("id",id);
     if(r.error) throw r.error;
     closeScheduleModal();
     await loadEmployees({silent:true});
-    toast("Horários salvos com sucesso.");
-  } catch(error){console.error(error);toast("Erro ao salvar os horários.");}
+    toast("Horários por dia salvos com sucesso.");
+  } catch(error) { console.error(error); toast("Erro ao salvar os horários. Execute employee_schedule_v14.sql no Supabase."); }
 }
 
 function openMenu(){ $("menuOverlay")?.classList.remove("hidden"); }
