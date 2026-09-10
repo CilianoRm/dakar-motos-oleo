@@ -648,28 +648,25 @@ function monthBounds(){
   };
 }
 
+// Carga mensal padrão da jornada. No sistema usamos o divisor mensal
+// convencional de 220h para jornada integral (44h/semana) e 110h para
+// meio período (22h/semana). Não somamos os horários individuais aqui,
+// pois eles são usados para calcular horas trabalhadas/saldo; esta informação
+// representa o padrão mensal da jornada do funcionário.
 function employeeMonthlyExpectedMinutes(employee){
-  const {first,last}=monthBounds();
-  let total=0;
-  for(const date of dateRangeDays(first,last)){
-    const type=effectiveDayType(employee.id,date);
-    // Folga/férias retiram carga prevista. Falta não retira: ela gera saldo negativo.
-    if(type==='folga' || type==='ferias' || type==='folga_ferias' || type==='feriado_trabalhado') continue;
-    total += expectedMinutes(employee,date,'trabalho');
-  }
-  return Math.round(total);
+  return jornadaType(employee) === 'meio_periodo' ? 110*60 : 220*60;
 }
 
 function standardMinutesForPeriod(employee, throughToday=true){
-  const {first,last}=monthBounds();
-  const end=throughToday ? localDateISO() : last;
-  const days=dateRangeDays(first,end).length;
-  return Math.round(jornadaWeeklyMinutes(employee)*(days/7));
+  // Para CARGA HORÁRIA EXCEDENTE MÊS, a comparação é contra a carga mensal
+  // padrão da jornada. O parâmetro throughToday é mantido para compatibilidade
+  // com outras chamadas, mas a referência mensal é sempre 220h/110h.
+  return employeeMonthlyExpectedMinutes(employee);
 }
 
 function employeeMonthlyExcessMinutes(employee){
   const worked=employeeMonthWorkedMinutes(employee.id);
-  const standard=standardMinutesForPeriod(employee,true);
+  const standard=employeeMonthlyExpectedMinutes(employee);
   return Math.round(worked-standard);
 }
 

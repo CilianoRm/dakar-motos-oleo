@@ -15,3 +15,11 @@ Para uma base existente, execute uma única vez `employee_jornada_v16.sql` no SQ
 - Ao apagar o almoço de um dia, ele permanece apagado e não é preenchido automaticamente pelo almoço de outro dia.
 - O lançamento de ponto usa o almoço configurado especificamente para a data escolhida.
 - Não há SQL novo nesta versão: a correção é no `app.js` e no cache da página.
+
+
+## V18 — Carga horária mensal corrigida
+- PERÍODO INTEGRAL: carga mensal padrão de 220:00.
+- MEIO PERÍODO: carga mensal padrão de 110:00.
+- CARGA HORÁRIA EXCEDENTE MÊS = horas efetivamente trabalhadas no mês menos a carga padrão da jornada.
+- O resultado é exibido em horas e minutos, com sinal positivo ou negativo.
+- Os horários individuais por dia continuam sendo usados para calcular a carga esperada e o saldo diário.
