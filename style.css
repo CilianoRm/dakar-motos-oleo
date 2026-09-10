@@ -57,3 +57,5 @@
 .weekly-schedule-row b{font-size:12px;color:#fff}
 .weekly-schedule-row input{width:100%;background:#292929;color:#fff;border:1px solid #555;border-radius:7px;padding:9px}
 @media(max-width:700px){.weekly-schedule-editor{margin-left:-4px;margin-right:-4px}.weekly-schedule-head,.weekly-schedule-row{grid-template-columns:120px repeat(4,105px);min-width:650px}.weekly-schedule-row input{padding:8px}.schedule-box{max-height:92vh;overflow:auto}}
+
+.monthly-hours-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}.monthly-hours-grid>div{background:#242424;border:1px solid #383838;border-radius:10px;padding:15px}.monthly-hours-grid small{display:block;color:var(--red);font-size:11px;margin-bottom:8px}.monthly-hours-grid strong{display:block;font-size:24px}.monthly-hours-grid span{display:block;color:#888;font-size:11px;margin-top:7px}@media(max-width:600px){.monthly-hours-grid{grid-template-columns:1fr}}
