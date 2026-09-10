@@ -453,6 +453,13 @@ const WEEKDAY_KEYS = [
   {day:0,key:'dom',label:'Domingo'}
 ];
 
+function hasPerDayScheduleFields(employee,key) {
+  return Object.prototype.hasOwnProperty.call(employee, `${key}_entrada`) ||
+         Object.prototype.hasOwnProperty.call(employee, `${key}_saida`) ||
+         Object.prototype.hasOwnProperty.call(employee, `${key}_almoco_inicio`) ||
+         Object.prototype.hasOwnProperty.call(employee, `${key}_almoco_fim`);
+}
+
 function scheduleForKey(employee,key) {
   const start=employee[`${key}_entrada`] || null;
   const end=employee[`${key}_saida`] || null;
@@ -464,14 +471,19 @@ function scheduleFor(employee, dateStr = localDateISO()) {
   const day = weekdayForDate(dateStr);
   const cfg = WEEKDAY_KEYS.find(x => x.day === day);
   if (!cfg) return null;
-  const current = scheduleForKey(employee,cfg.key);
-  if(current) return current;
-  // Compatibilidade com a estrutura antiga antes da migração V14.
+
+  // V14+: se os campos por dia existem, eles são a fonte única da verdade.
+  // Assim, deixar um dia sem horário (ou sem almoço) NÃO puxa o horário de outro dia.
+  if (hasPerDayScheduleFields(employee,cfg.key)) {
+    return scheduleForKey(employee,cfg.key);
+  }
+
+  // Compatibilidade somente com bancos ainda não migrados para V14.
   if (cfg.key !== 'sab' && cfg.key !== 'dom' && employee.seg_sex_entrada && employee.seg_sex_saida) {
-    return { start:employee.seg_sex_entrada, end:employee.seg_sex_saida, lunchStart:employee.almoco_inicio, lunchEnd:employee.almoco_fim };
+    return { start:employee.seg_sex_entrada, end:employee.seg_sex_saida, lunchStart:employee.almoco_inicio||null, lunchEnd:employee.almoco_fim||null };
   }
   if (cfg.key === 'sab' && employee.sab_entrada && employee.sab_saida) {
-    return { start:employee.sab_entrada, end:employee.sab_saida, lunchStart:employee.almoco_inicio, lunchEnd:employee.almoco_fim };
+    return { start:employee.sab_entrada, end:employee.sab_saida, lunchStart:employee.almoco_inicio||null, lunchEnd:employee.almoco_fim||null };
   }
   return null;
 }
@@ -616,11 +628,49 @@ function employeeMonthWorkedMinutes(employeeId){
   return Math.round(total);
 }
 
-function legalMonthlyMinutes(employee){
-  // Para a jornada integral padrão de 44h semanais, o divisor mensal é 220h.
-  // Caso futuramente o cadastro tenha jornada contratual específica, este ponto
-  // pode ser adaptado para usar o divisor correspondente.
-  return 220 * 60;
+function jornadaType(employee){
+  return employee?.jornada_tipo === 'meio_periodo' ? 'meio_periodo' : 'integral';
+}
+
+function jornadaLabel(employee){
+  return jornadaType(employee) === 'meio_periodo' ? 'MEIO PERÍODO' : 'PERÍODO INTEGRAL';
+}
+
+function jornadaWeeklyMinutes(employee){
+  return jornadaType(employee) === 'meio_periodo' ? 22*60 : 44*60;
+}
+
+function monthBounds(){
+  const now=new Date();
+  return {
+    first:localDateISO(new Date(now.getFullYear(),now.getMonth(),1)),
+    last:localDateISO(new Date(now.getFullYear(),now.getMonth()+1,0))
+  };
+}
+
+function employeeMonthlyExpectedMinutes(employee){
+  const {first,last}=monthBounds();
+  let total=0;
+  for(const date of dateRangeDays(first,last)){
+    const type=effectiveDayType(employee.id,date);
+    // Folga/férias retiram carga prevista. Falta não retira: ela gera saldo negativo.
+    if(type==='folga' || type==='ferias' || type==='folga_ferias' || type==='feriado_trabalhado') continue;
+    total += expectedMinutes(employee,date,'trabalho');
+  }
+  return Math.round(total);
+}
+
+function standardMinutesForPeriod(employee, throughToday=true){
+  const {first,last}=monthBounds();
+  const end=throughToday ? localDateISO() : last;
+  const days=dateRangeDays(first,end).length;
+  return Math.round(jornadaWeeklyMinutes(employee)*(days/7));
+}
+
+function employeeMonthlyExcessMinutes(employee){
+  const worked=employeeMonthWorkedMinutes(employee.id);
+  const standard=standardMinutesForPeriod(employee,true);
+  return Math.round(worked-standard);
 }
 
 function employeeDailyBaseMinutes(employee){
@@ -836,8 +886,8 @@ function renderEmployees() {
   list.innerHTML=employeeRows.map(e=>{const type=effectiveDayType(e.id,today),p=getPoint(e.id,today),completed=!!p?.saida,bal=type==='trabalho'&&completed?workedMinutes(p,e)-expectedMinutes(e,today,'trabalho'):(type==='feriado_trabalhado'&&completed?workedMinutes(p,e):0);return `<button class="employee-list-item ${e.id===selectedEmployeeId?'active':''}" type="button" data-id="${e.id}"><span>${escapeHtml(e.nome)}</span><small class="${bal<0?'negative':'positive'}">${completed?minutesToHuman(bal):agendaLabel(type)}</small></button>`;}).join('')||'<div class="empty-employees">Nenhum funcionário encontrado.</div>';
   list.querySelectorAll('.employee-list-item').forEach(b=>b.addEventListener('click',()=>{selectedEmployeeId=b.dataset.id;calendarMonth=new Date();selectedCalendarDate=localDateISO();renderEmployees();}));
   const e=employeeRows.find(x=>x.id===selectedEmployeeId);if(!e){detail.innerHTML='<p>Nenhum funcionário selecionado.</p>';return;}
-  const viewDate=selectedCalendarDate||today, type=effectiveDayType(e.id,viewDate),p=getPoint(e.id,viewDate),expected=expectedMinutes(e,viewDate,'trabalho'),worked=(type==='trabalho'||type==='feriado_trabalhado')?workedMinutes(p,e):0,daily=type==='folga'||type==='ferias'?0:(type==='nao_veio'?-expected:(type==='feriado_trabalhado'?worked:worked-expected)),period=employeePeriodBalance(e.id),monthWorked=employeeMonthWorkedMinutes(e.id),monthStandard=legalMonthlyMinutes(e),monthExcess=Math.max(0,monthWorked-monthStandard),ledger=employeeDayLedger(e);
-  detail.innerHTML=`<div class="employee-detail-head"><div><span class="employee-tag">ATIVO</span><h1>${escapeHtml(e.nome)}</h1></div><div class="employee-head-actions"><button class="secondary" id="editScheduleBtn">ALTERAR HORÁRIOS</button></div></div><div class="schedule-summary"><div><b>HORÁRIOS POR DIA</b>${WEEKDAY_KEYS.map(cfg=>{const s=scheduleForKey(e,cfg.key);return `<span><strong>${cfg.label}:</strong> ${s?`${s.start.slice(0,5)} às ${s.end.slice(0,5)}`:'Não trabalha'}</span>`;}).join('')}</div><div><b>ALMOÇO DO DIA SELECIONADO</b><span>${scheduleFor(e,viewDate)?.lunchStart&&scheduleFor(e,viewDate)?.lunchEnd?`${scheduleFor(e,viewDate).lunchStart.slice(0,5)} às ${scheduleFor(e,viewDate).lunchEnd.slice(0,5)}`:'Sem horário de almoço'}</span></div><div><b>CARGA ESPERADA</b><span>${durationHuman(expected)}</span></div></div></div><div class="agenda-card"><button type="button" class="agenda-toggle" id="agendaToggle"><span>AGENDA DO FUNCIONÁRIO <small id="agendaSummaryText" class="agenda-summary-text"></small></span><span id="agendaToggleIcon">＋</span></button><div id="agendaBody" class="agenda-body collapsed"><div id="employeeCalendar" class="employee-calendar"></div><div id="agendaControls"></div></div></div><div class="attendance-card"><div class="section-title">REGISTRO DE HORÁRIOS <span>${formatDateBR(viewDate)}</span></div><div class="attendance-status-line">STATUS DO DIA: <strong>${agendaLabel(type)}</strong></div><div class="attendance-grid"><div><small>CHEGADA</small><strong>${fmtTime(p?.chegada)}</strong></div><div><small>SAÍDA ALMOÇO</small><strong>${fmtTime(p?.saida_almoco)}</strong></div><div><small>RETORNO</small><strong>${fmtTime(p?.retorno_almoco)}</strong></div><div><small>SAÍDA</small><strong>${fmtTime(p?.saida)}</strong></div></div><button class="employee-primary" id="attendanceBtn">LANÇAR HORÁRIOS</button><button class="secondary" id="clearAttendanceBtn">LIMPAR LANÇAMENTO DO DIA</button></div><div class="balance-grid"><div><small>HORAS TRABALHADAS</small><strong>${durationHuman(worked)}</strong></div><div><small>HORAS ESPERADAS</small><strong>${durationHuman(expected)}</strong></div><div><small>SALDO DO DIA</small><strong class="${daily<0?'negative':'positive'}">${minutesToHuman(daily)}</strong></div><div><small>SALDO NO MÊS</small><strong class="${period<0?'negative':'positive'}">${minutesToHuman(period)}</strong></div></div><div class="monthly-hours-grid"><div><small>CARGA HORÁRIA MÊS</small><strong>${durationHuman(monthStandard)}</strong><span>Padrão mensal de 44h semanais</span></div><div><small>CARGA HORÁRIA EXCEDENTE MÊS</small><strong class="${monthExcess>0?'negative':'positive'}">${durationHuman(monthExcess)}</strong><span>Trabalhadas no mês: ${durationHuman(monthWorked)}</span></div></div><div class="credit-summary"><div><small>DIAS DISPONÍVEIS</small><strong class="${ledger.remainingCredits>0?'positive':''}">${ledger.remainingCredits.toFixed(2)}</strong></div><div><small>FERIADOS TRABALHADOS</small><strong>${ledger.holidayCredits}</strong></div><div><small>HORAS EM CRÉDITO</small><strong>${ledger.hourCreditsDays.toFixed(2)} dia</strong></div><div><small>DIAS JÁ DEVIDOS</small><strong class="${ledger.manualDebtDays>0?'negative':'positive'}">${ledger.manualDebtDays.toFixed(2)}</strong></div><div><small>SALDO DISPONÍVEL</small><strong class="${ledger.netAvailableDays<0?'negative':'positive'}">${signedDaysAndMinutes(ledger.netAvailableDays,ledger.dailyBase)}</strong></div></div><div class="schedule-note-display">${escapeHtml(e.observacao||'')}</div>`;
+  const viewDate=selectedCalendarDate||today, type=effectiveDayType(e.id,viewDate),p=getPoint(e.id,viewDate),expected=expectedMinutes(e,viewDate,'trabalho'),worked=(type==='trabalho'||type==='feriado_trabalhado')?workedMinutes(p,e):0,daily=type==='folga'||type==='ferias'?0:(type==='nao_veio'?-expected:(type==='feriado_trabalhado'?worked:worked-expected)),period=employeePeriodBalance(e.id),monthWorked=employeeMonthWorkedMinutes(e.id),monthExpected=employeeMonthlyExpectedMinutes(e),monthExcess=employeeMonthlyExcessMinutes(e),standardThroughToday=standardMinutesForPeriod(e,true),ledger=employeeDayLedger(e);
+  detail.innerHTML=`<div class="employee-detail-head"><div><span class="employee-tag">ATIVO</span><h1>${escapeHtml(e.nome)}</h1></div><div class="employee-head-actions"><button class="secondary" id="editScheduleBtn">ALTERAR HORÁRIOS</button></div></div><div class="schedule-summary"><div><b>HORÁRIOS POR DIA</b>${WEEKDAY_KEYS.map(cfg=>{const s=scheduleForKey(e,cfg.key);return `<span><strong>${cfg.label}:</strong> ${s?`${s.start.slice(0,5)} às ${s.end.slice(0,5)}`:'Não trabalha'}</span>`;}).join('')}</div><div><b>ALMOÇO DO DIA SELECIONADO</b><span>${scheduleFor(e,viewDate)?.lunchStart&&scheduleFor(e,viewDate)?.lunchEnd?`${scheduleFor(e,viewDate).lunchStart.slice(0,5)} às ${scheduleFor(e,viewDate).lunchEnd.slice(0,5)}`:'Sem horário de almoço'}</span></div><div><b>CARGA ESPERADA</b><span>${durationHuman(expected)}</span></div><div><b>CARGA HORÁRIA MÊS</b><span>${durationHuman(monthExpected)}</span><small class="schedule-subinfo">Calculada pelo horário escolhido</small></div><div><b>CARGA HORÁRIA EXCEDENTE MÊS</b><span class="${monthExcess<0?'negative':'positive'}">${minutesToHuman(monthExcess)}</span><small class="schedule-subinfo">Padrão ${jornadaLabel(e)}: ${durationHuman(standardThroughToday)} até hoje</small></div></div></div><div class="agenda-card"><button type="button" class="agenda-toggle" id="agendaToggle"><span>AGENDA DO FUNCIONÁRIO <small id="agendaSummaryText" class="agenda-summary-text"></small></span><span id="agendaToggleIcon">＋</span></button><div id="agendaBody" class="agenda-body collapsed"><div id="employeeCalendar" class="employee-calendar"></div><div id="agendaControls"></div></div></div><div class="attendance-card"><div class="section-title">REGISTRO DE HORÁRIOS <span>${formatDateBR(viewDate)}</span></div><div class="attendance-status-line">STATUS DO DIA: <strong>${agendaLabel(type)}</strong></div><div class="attendance-grid"><div><small>CHEGADA</small><strong>${fmtTime(p?.chegada)}</strong></div><div><small>SAÍDA ALMOÇO</small><strong>${fmtTime(p?.saida_almoco)}</strong></div><div><small>RETORNO</small><strong>${fmtTime(p?.retorno_almoco)}</strong></div><div><small>SAÍDA</small><strong>${fmtTime(p?.saida)}</strong></div></div><button class="employee-primary" id="attendanceBtn">LANÇAR HORÁRIOS</button><button class="secondary" id="clearAttendanceBtn">LIMPAR LANÇAMENTO DO DIA</button></div><div class="balance-grid"><div><small>HORAS TRABALHADAS</small><strong>${durationHuman(worked)}</strong></div><div><small>HORAS ESPERADAS</small><strong>${durationHuman(expected)}</strong></div><div><small>SALDO DO DIA</small><strong class="${daily<0?'negative':'positive'}">${minutesToHuman(daily)}</strong></div><div><small>SALDO NO MÊS</small><strong class="${period<0?'negative':'positive'}">${minutesToHuman(period)}</strong></div></div><div class="credit-summary"><div><small>DIAS DISPONÍVEIS</small><strong class="${ledger.remainingCredits>0?'positive':''}">${ledger.remainingCredits.toFixed(2)}</strong></div><div><small>FERIADOS TRABALHADOS</small><strong>${ledger.holidayCredits}</strong></div><div><small>HORAS EM CRÉDITO</small><strong>${ledger.hourCreditsDays.toFixed(2)} dia</strong></div><div><small>DIAS JÁ DEVIDOS</small><strong class="${ledger.manualDebtDays>0?'negative':'positive'}">${ledger.manualDebtDays.toFixed(2)}</strong></div><div><small>SALDO DISPONÍVEL</small><strong class="${ledger.netAvailableDays<0?'negative':'positive'}">${signedDaysAndMinutes(ledger.netAvailableDays,ledger.dailyBase)}</strong></div></div><div class="schedule-note-display">${escapeHtml(e.observacao||'')}</div>`;
   renderEmployeeCalendar(e);renderAgendaControls(e);
   const agendaBody=$("agendaBody");
   const agendaIcon=$("agendaToggleIcon");
@@ -911,7 +961,8 @@ function openAttendanceModal(employee) {
   $("attendanceLunchOut").value = fmtInputTime(p?.saida_almoco);
   $("attendanceLunchIn").value = fmtInputTime(p?.retorno_almoco);
   $("attendanceDeparture").value = fmtInputTime(p?.saida);
-  const hasLunch = !!(employee.almoco_inicio && employee.almoco_fim);
+  const daySchedule = scheduleFor(employee,date);
+  const hasLunch = !!(daySchedule?.lunchStart && daySchedule?.lunchEnd);
   $("attendanceLunchFields").classList.toggle("hidden", !hasLunch);
   $("attendanceModalHelp").textContent = "Digite somente os horários que você tiver anotado. O tipo do dia é definido na Agenda, fora deste lançamento.";
   $("attendanceModal").classList.remove("hidden");
@@ -949,8 +1000,9 @@ async function saveAttendanceManual() {
   const lunchIn = $("attendanceLunchIn").value;
   const departure = $("attendanceDeparture").value;
   const tipo = effectiveDayType(employee.id,date);
-  const hasLunch = !!(employee.almoco_inicio && employee.almoco_fim);
   if (!date) return toast("Escolha a data.");
+  const daySchedule = scheduleFor(employee,date);
+  const hasLunch = !!(daySchedule?.lunchStart && daySchedule?.lunchEnd);
   if (tipo === 'trabalho' || tipo === 'feriado_trabalhado') {
     // O almoço pode ser lançado parcialmente: saída agora e retorno depois, ou vice-versa.
   }
@@ -995,12 +1047,18 @@ async function clearAttendance(employee, date=selectedCalendarDate||localDateISO
 
 function openScheduleModal(employee) {
   $("scheduleEmployeeId").value=employee.id;
+  $("scheduleJornadaTipo").value=jornadaType(employee);
   for (const cfg of WEEKDAY_KEYS) {
     const key = cfg.key;
     const start = employee[`${key}_entrada`] || ((key !== 'sab' && key !== 'dom') ? employee.seg_sex_entrada : (key === 'sab' ? employee.sab_entrada : ''));
     const end = employee[`${key}_saida`] || ((key !== 'sab' && key !== 'dom') ? employee.seg_sex_saida : (key === 'sab' ? employee.sab_saida : ''));
-    const lunchStart = employee[`${key}_almoco_inicio`] || ((key !== 'sab' && key !== 'dom') || key === 'sab' ? employee.almoco_inicio : '');
-    const lunchEnd = employee[`${key}_almoco_fim`] || ((key !== 'sab' && key !== 'dom') || key === 'sab' ? employee.almoco_fim : '');
+    const perDayFieldsExist = hasPerDayScheduleFields(employee,key);
+    // Depois da V14, o almoço é totalmente independente em cada dia.
+    // O fallback antigo só é usado quando os campos por dia ainda não existem no banco.
+    const lunchStart = perDayFieldsExist ? (employee[`${key}_almoco_inicio`] || '') :
+      (((key !== 'sab' && key !== 'dom') || key === 'sab') ? (employee.almoco_inicio || '') : '');
+    const lunchEnd = perDayFieldsExist ? (employee[`${key}_almoco_fim`] || '') :
+      (((key !== 'sab' && key !== 'dom') || key === 'sab') ? (employee.almoco_fim || '') : '');
     $(`${key}Entrada`).value=(start||'').slice(0,5);
     $(`${key}Saida`).value=(end||'').slice(0,5);
     $(`${key}AlmocoInicio`).value=(lunchStart||'').slice(0,5);
@@ -1014,7 +1072,7 @@ function closeScheduleModal() { $("scheduleModal")?.classList.add("hidden"); }
 
 async function saveSchedule() {
   const id=$("scheduleEmployeeId").value;
-  const payload={ updated_at:new Date().toISOString(), observacao:$("scheduleObservation").value.trim()||null };
+  const payload={ updated_at:new Date().toISOString(), observacao:$("scheduleObservation").value.trim()||null, jornada_tipo:$("scheduleJornadaTipo").value||'integral' };
   for (const cfg of WEEKDAY_KEYS) {
     const key=cfg.key;
     const entrada=$(`${key}Entrada`).value||null;

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Dakar Motos — Controle de Troca de Óleo</title>
-<link rel="stylesheet" href="style.css?v=15.0">
+<link rel="stylesheet" href="style.css?v=17.0">
 </head>
 <body><div class="app">
 <header><div class="brand"><img src="logo-dakar.jpg" alt="Dakar Motos"></div><div class="header-title">CONTROLE DE TROCA DE ÓLEO</div><div class="clock" id="clock"></div><button class="menu-btn" id="menuBtn" aria-label="Abrir menu">☰</button></header>
@@ -26,7 +26,7 @@
 <div class="divider"></div><div class="section-title center small">REGISTRAR AÇÃO</div>
 <div class="actions">
 <button class="action oil" id="oilBtn"><span class="action-label">TROCOU ÓLEO</span></button>
-<button class="action busy" id="busyBtn"><span class="action-label">-1 TROCA ÓLEO</span></button>
+<button class="action busy" id="busyBtn"><span class="action-label">DIMINUIR 1 TROCA</span></button>
 </div>
 
 <div class="hint">TROCOU ÓLEO registra +1. OCUPADO abre a correção e diminui 1 troca do mecânico escolhido.</div>
@@ -155,6 +155,15 @@
     <div class="section-title">ALTERAR HORÁRIOS <button class="icon-btn" id="scheduleClose">×</button></div>
     <p class="modal-help">As alterações ficam salvas no banco e valem para os próximos registros. O histórico de ponto já registrado não é alterado.</p>
     <input type="hidden" id="scheduleEmployeeId">
+    <div class="jornada-config">
+      <label>TIPO DE JORNADA
+        <select id="scheduleJornadaTipo">
+          <option value="integral">PERÍODO INTEGRAL — 44 HORAS/SEMANA</option>
+          <option value="meio_periodo">MEIO PERÍODO — 22 HORAS/SEMANA</option>
+        </select>
+      </label>
+      <p class="modal-help">Define o padrão usado para o banco de horas. A carga horária mensal continua sendo calculada pelos horários definidos abaixo.</p>
+    </div>
     <div class="weekly-schedule-editor">
       <div class="weekly-schedule-head"><span>DIA</span><span>ENTRADA</span><span>SAÍDA</span><span>ALMOÇO — SAÍDA</span><span>ALMOÇO — RETORNO</span></div>
       <div class="weekly-schedule-row"><b>SEGUNDA-FEIRA</b><input id="segEntrada" type="time"><input id="segSaida" type="time"><input id="segAlmocoInicio" type="time"><input id="segAlmocoFim" type="time"></div>
@@ -182,5 +191,5 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=15.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=17.0"></script>
 </body></html>
