@@ -648,25 +648,37 @@ function monthBounds(){
   };
 }
 
-// Carga mensal padrão da jornada. No sistema usamos o divisor mensal
-// convencional de 220h para jornada integral (44h/semana) e 110h para
-// meio período (22h/semana). Não somamos os horários individuais aqui,
-// pois eles são usados para calcular horas trabalhadas/saldo; esta informação
-// representa o padrão mensal da jornada do funcionário.
 function employeeMonthlyExpectedMinutes(employee){
-  return jornadaType(employee) === 'meio_periodo' ? 110*60 : 220*60;
+  // Carga do mês = somente a carga que já venceu no mês atual,
+  // calculada dia a dia pelo horário configurado para cada dia da semana.
+  // Isso evita transformar 44 h/semana em um valor fixo de 220 h.
+  const {first}=monthBounds();
+  const today=localDateISO();
+  let total=0;
+  for(const date of dateRangeDays(first,today)){
+    const type=effectiveDayType(employee.id,date);
+    // Folga/férias não geram carga. Feriado trabalhado é crédito, não carga esperada.
+    if(type==='folga' || type==='ferias' || type==='folga_ferias' || type==='feriado_trabalhado') continue;
+    total += expectedMinutes(employee,date,'trabalho');
+  }
+  return Math.round(total);
 }
 
 function standardMinutesForPeriod(employee, throughToday=true){
-  // Para CARGA HORÁRIA EXCEDENTE MÊS, a comparação é contra a carga mensal
-  // padrão da jornada. O parâmetro throughToday é mantido para compatibilidade
-  // com outras chamadas, mas a referência mensal é sempre 220h/110h.
-  return employeeMonthlyExpectedMinutes(employee);
+  // Padrão do banco de horas: 44 h/semana (integral) ou 22 h/semana
+  // (meio período), proporcional ao período já transcorrido no mês.
+  const {first,last}=monthBounds();
+  const end=throughToday ? localDateISO() : last;
+  const days=dateRangeDays(first,end);
+  if(!days.length) return 0;
+  // Usa dias corridos apenas para transformar a jornada semanal em referência
+  // proporcional; a carga efetiva mostrada acima continua sendo a soma do horário.
+  return Math.round(jornadaWeeklyMinutes(employee)*(days.length/7));
 }
 
 function employeeMonthlyExcessMinutes(employee){
   const worked=employeeMonthWorkedMinutes(employee.id);
-  const standard=employeeMonthlyExpectedMinutes(employee);
+  const standard=standardMinutesForPeriod(employee,true);
   return Math.round(worked-standard);
 }
 
@@ -884,7 +896,7 @@ function renderEmployees() {
   list.querySelectorAll('.employee-list-item').forEach(b=>b.addEventListener('click',()=>{selectedEmployeeId=b.dataset.id;calendarMonth=new Date();selectedCalendarDate=localDateISO();renderEmployees();}));
   const e=employeeRows.find(x=>x.id===selectedEmployeeId);if(!e){detail.innerHTML='<p>Nenhum funcionário selecionado.</p>';return;}
   const viewDate=selectedCalendarDate||today, type=effectiveDayType(e.id,viewDate),p=getPoint(e.id,viewDate),expected=expectedMinutes(e,viewDate,'trabalho'),worked=(type==='trabalho'||type==='feriado_trabalhado')?workedMinutes(p,e):0,daily=type==='folga'||type==='ferias'?0:(type==='nao_veio'?-expected:(type==='feriado_trabalhado'?worked:worked-expected)),period=employeePeriodBalance(e.id),monthWorked=employeeMonthWorkedMinutes(e.id),monthExpected=employeeMonthlyExpectedMinutes(e),monthExcess=employeeMonthlyExcessMinutes(e),standardThroughToday=standardMinutesForPeriod(e,true),ledger=employeeDayLedger(e);
-  detail.innerHTML=`<div class="employee-detail-head"><div><span class="employee-tag">ATIVO</span><h1>${escapeHtml(e.nome)}</h1></div><div class="employee-head-actions"><button class="secondary" id="editScheduleBtn">ALTERAR HORÁRIOS</button></div></div><div class="schedule-summary"><div><b>HORÁRIOS POR DIA</b>${WEEKDAY_KEYS.map(cfg=>{const s=scheduleForKey(e,cfg.key);return `<span><strong>${cfg.label}:</strong> ${s?`${s.start.slice(0,5)} às ${s.end.slice(0,5)}`:'Não trabalha'}</span>`;}).join('')}</div><div><b>ALMOÇO DO DIA SELECIONADO</b><span>${scheduleFor(e,viewDate)?.lunchStart&&scheduleFor(e,viewDate)?.lunchEnd?`${scheduleFor(e,viewDate).lunchStart.slice(0,5)} às ${scheduleFor(e,viewDate).lunchEnd.slice(0,5)}`:'Sem horário de almoço'}</span></div><div><b>CARGA ESPERADA</b><span>${durationHuman(expected)}</span></div><div><b>CARGA HORÁRIA MÊS</b><span>${durationHuman(monthExpected)}</span><small class="schedule-subinfo">Calculada pelo horário escolhido</small></div><div><b>CARGA HORÁRIA EXCEDENTE MÊS</b><span class="${monthExcess<0?'negative':'positive'}">${minutesToHuman(monthExcess)}</span><small class="schedule-subinfo">Padrão ${jornadaLabel(e)}: ${durationHuman(standardThroughToday)} até hoje</small></div></div></div><div class="agenda-card"><button type="button" class="agenda-toggle" id="agendaToggle"><span>AGENDA DO FUNCIONÁRIO <small id="agendaSummaryText" class="agenda-summary-text"></small></span><span id="agendaToggleIcon">＋</span></button><div id="agendaBody" class="agenda-body collapsed"><div id="employeeCalendar" class="employee-calendar"></div><div id="agendaControls"></div></div></div><div class="attendance-card"><div class="section-title">REGISTRO DE HORÁRIOS <span>${formatDateBR(viewDate)}</span></div><div class="attendance-status-line">STATUS DO DIA: <strong>${agendaLabel(type)}</strong></div><div class="attendance-grid"><div><small>CHEGADA</small><strong>${fmtTime(p?.chegada)}</strong></div><div><small>SAÍDA ALMOÇO</small><strong>${fmtTime(p?.saida_almoco)}</strong></div><div><small>RETORNO</small><strong>${fmtTime(p?.retorno_almoco)}</strong></div><div><small>SAÍDA</small><strong>${fmtTime(p?.saida)}</strong></div></div><button class="employee-primary" id="attendanceBtn">LANÇAR HORÁRIOS</button><button class="secondary" id="clearAttendanceBtn">LIMPAR LANÇAMENTO DO DIA</button></div><div class="balance-grid"><div><small>HORAS TRABALHADAS</small><strong>${durationHuman(worked)}</strong></div><div><small>HORAS ESPERADAS</small><strong>${durationHuman(expected)}</strong></div><div><small>SALDO DO DIA</small><strong class="${daily<0?'negative':'positive'}">${minutesToHuman(daily)}</strong></div><div><small>SALDO NO MÊS</small><strong class="${period<0?'negative':'positive'}">${minutesToHuman(period)}</strong></div></div><div class="credit-summary"><div><small>DIAS DISPONÍVEIS</small><strong class="${ledger.remainingCredits>0?'positive':''}">${ledger.remainingCredits.toFixed(2)}</strong></div><div><small>FERIADOS TRABALHADOS</small><strong>${ledger.holidayCredits}</strong></div><div><small>HORAS EM CRÉDITO</small><strong>${ledger.hourCreditsDays.toFixed(2)} dia</strong></div><div><small>DIAS JÁ DEVIDOS</small><strong class="${ledger.manualDebtDays>0?'negative':'positive'}">${ledger.manualDebtDays.toFixed(2)}</strong></div><div><small>SALDO DISPONÍVEL</small><strong class="${ledger.netAvailableDays<0?'negative':'positive'}">${signedDaysAndMinutes(ledger.netAvailableDays,ledger.dailyBase)}</strong></div></div><div class="schedule-note-display">${escapeHtml(e.observacao||'')}</div>`;
+  detail.innerHTML=`<div class="employee-detail-head"><div><span class="employee-tag">ATIVO</span><h1>${escapeHtml(e.nome)}</h1></div><div class="employee-head-actions"><button class="secondary" id="editScheduleBtn">ALTERAR HORÁRIOS</button></div></div><div class="schedule-summary"><div><b>HORÁRIOS POR DIA</b>${WEEKDAY_KEYS.map(cfg=>{const s=scheduleForKey(e,cfg.key);return `<span><strong>${cfg.label}:</strong> ${s?`${s.start.slice(0,5)} às ${s.end.slice(0,5)}`:'Não trabalha'}</span>`;}).join('')}</div><div><b>ALMOÇO DO DIA SELECIONADO</b><span>${scheduleFor(e,viewDate)?.lunchStart&&scheduleFor(e,viewDate)?.lunchEnd?`${scheduleFor(e,viewDate).lunchStart.slice(0,5)} às ${scheduleFor(e,viewDate).lunchEnd.slice(0,5)}`:'Sem horário de almoço'}</span></div><div><b>CARGA ESPERADA</b><span>${durationHuman(expected)}</span></div><div><b>CARGA HORÁRIA MÊS</b><span>${durationHuman(monthExpected)}</span><small class="schedule-subinfo">Carga prevista do mês até hoje, pelo horário de cada dia</small></div><div><b>CARGA HORÁRIA EXCEDENTE MÊS</b><span class="${monthExcess<0?'negative':'positive'}">${minutesToHuman(monthExcess)}</span><small class="schedule-subinfo">Banco ${jornadaLabel(e)}: ${durationHuman(standardThroughToday)} até hoje</small></div></div></div><div class="agenda-card"><button type="button" class="agenda-toggle" id="agendaToggle"><span>AGENDA DO FUNCIONÁRIO <small id="agendaSummaryText" class="agenda-summary-text"></small></span><span id="agendaToggleIcon">＋</span></button><div id="agendaBody" class="agenda-body collapsed"><div id="employeeCalendar" class="employee-calendar"></div><div id="agendaControls"></div></div></div><div class="attendance-card"><div class="section-title">REGISTRO DE HORÁRIOS <span>${formatDateBR(viewDate)}</span></div><div class="attendance-status-line">STATUS DO DIA: <strong>${agendaLabel(type)}</strong></div><div class="attendance-grid"><div><small>CHEGADA</small><strong>${fmtTime(p?.chegada)}</strong></div><div><small>SAÍDA ALMOÇO</small><strong>${fmtTime(p?.saida_almoco)}</strong></div><div><small>RETORNO</small><strong>${fmtTime(p?.retorno_almoco)}</strong></div><div><small>SAÍDA</small><strong>${fmtTime(p?.saida)}</strong></div></div><button class="employee-primary" id="attendanceBtn">LANÇAR HORÁRIOS</button><button class="secondary" id="clearAttendanceBtn">LIMPAR LANÇAMENTO DO DIA</button></div><div class="balance-grid"><div><small>HORAS TRABALHADAS</small><strong>${durationHuman(worked)}</strong></div><div><small>HORAS ESPERADAS</small><strong>${durationHuman(expected)}</strong></div><div><small>SALDO DO DIA</small><strong class="${daily<0?'negative':'positive'}">${minutesToHuman(daily)}</strong></div><div><small>SALDO NO MÊS</small><strong class="${period<0?'negative':'positive'}">${minutesToHuman(period)}</strong></div></div><div class="credit-summary"><div><small>DIAS DISPONÍVEIS</small><strong class="${ledger.remainingCredits>0?'positive':''}">${ledger.remainingCredits.toFixed(2)}</strong></div><div><small>FERIADOS TRABALHADOS</small><strong>${ledger.holidayCredits}</strong></div><div><small>HORAS EM CRÉDITO</small><strong>${ledger.hourCreditsDays.toFixed(2)} dia</strong></div><div><small>DIAS JÁ DEVIDOS</small><strong class="${ledger.manualDebtDays>0?'negative':'positive'}">${ledger.manualDebtDays.toFixed(2)}</strong></div><div><small>SALDO DISPONÍVEL</small><strong class="${ledger.netAvailableDays<0?'negative':'positive'}">${signedDaysAndMinutes(ledger.netAvailableDays,ledger.dailyBase)}</strong></div></div><div class="schedule-note-display">${escapeHtml(e.observacao||'')}</div>`;
   renderEmployeeCalendar(e);renderAgendaControls(e);
   const agendaBody=$("agendaBody");
   const agendaIcon=$("agendaToggleIcon");
@@ -1047,9 +1059,9 @@ function openScheduleModal(employee) {
   $("scheduleJornadaTipo").value=jornadaType(employee);
   for (const cfg of WEEKDAY_KEYS) {
     const key = cfg.key;
-    const start = employee[`${key}_entrada`] || ((key !== 'sab' && key !== 'dom') ? employee.seg_sex_entrada : (key === 'sab' ? employee.sab_entrada : ''));
-    const end = employee[`${key}_saida`] || ((key !== 'sab' && key !== 'dom') ? employee.seg_sex_saida : (key === 'sab' ? employee.sab_saida : ''));
     const perDayFieldsExist = hasPerDayScheduleFields(employee,key);
+    const start = perDayFieldsExist ? (employee[`${key}_entrada`] || '') : ((key !== 'sab' && key !== 'dom') ? employee.seg_sex_entrada : (key === 'sab' ? employee.sab_entrada : ''));
+    const end = perDayFieldsExist ? (employee[`${key}_saida`] || '') : ((key !== 'sab' && key !== 'dom') ? employee.seg_sex_saida : (key === 'sab' ? employee.sab_saida : ''));
     // Depois da V14, o almoço é totalmente independente em cada dia.
     // O fallback antigo só é usado quando os campos por dia ainda não existem no banco.
     const lunchStart = perDayFieldsExist ? (employee[`${key}_almoco_inicio`] || '') :
