@@ -21,3 +21,11 @@ Para uma base existente, execute uma única vez `employee_jornada_v16.sql` no SQ
 - Carga Horária Mês: soma somente a carga prevista que já venceu no mês atual, dia a dia, usando o horário configurado para cada dia. Não usa 220:00 fixo.
 - Carga Horária Excedente Mês: compara as horas efetivamente trabalhadas fechadas com o padrão integral (44 h/semana) ou meio período (22 h/semana), proporcionalmente ao período transcorrido.
 - Horários por dia: se um dia estiver vazio no banco, o formulário não repõe automaticamente o horário antigo.
+
+V19 — CORREÇÃO DA REFERÊNCIA DO BANCO DE HORAS
+- CARGA HORÁRIA MÊS não soma o calendário inteiro e não usa 220h.
+- Período integral: referência de 44:00.
+- Meio período: referência de 22:00.
+- CARGA HORÁRIA EXCEDENTE MÊS = horas efetivamente trabalhadas no mês - referência da jornada.
+- Resultado pode ser positivo ou negativo.
+- Os horários de trabalho e almoço continuam configuráveis livremente por dia da semana.
