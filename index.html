@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Dakar Motos — Controle de Troca de Óleo</title>
-<link rel="stylesheet" href="style.css?v=18.0">
+<link rel="stylesheet" href="style.css?v=19.1">
 </head>
 <body><div class="app">
 <header><div class="brand"><img src="logo-dakar.jpg" alt="Dakar Motos"></div><div class="header-title">CONTROLE DE TROCA DE ÓLEO</div><div class="clock" id="clock"></div><button class="menu-btn" id="menuBtn" aria-label="Abrir menu">☰</button></header>
@@ -26,7 +26,7 @@
 <div class="divider"></div><div class="section-title center small">REGISTRAR AÇÃO</div>
 <div class="actions">
 <button class="action oil" id="oilBtn"><span class="action-label">TROCOU ÓLEO</span></button>
-<button class="action busy" id="busyBtn"><span class="action-label">DIMINUIR 1 TROCA</span></button>
+<button class="action busy" id="busyBtn"><span class="action-label">OCUPADO</span></button>
 </div>
 
 <div class="hint">TROCOU ÓLEO registra +1. OCUPADO abre a correção e diminui 1 troca do mecânico escolhido.</div>
@@ -78,6 +78,19 @@
     <div class="employee-date" id="employeeDate"></div>
     <button class="secondary" id="employeesBack">← VOLTAR</button>
   </div>
+
+  <section class="holiday-calendar card" aria-labelledby="holidayCalendarTitle">
+    <div class="holiday-heading"><div><h2 id="holidayCalendarTitle">CALENDÁRIO GERAL DE FERIADOS</h2><p>Cadastre uma vez; vale para todos os funcionários e computadores conectados.</p></div><span class="holiday-shared-label">COMPARTILHADO</span></div>
+    <div class="holiday-form">
+      <label>DATA<input id="holidayDate" type="date" required></label>
+      <label>FERIADO<input id="holidayName" type="text" maxlength="120" placeholder="Ex.: Feriado municipal" required></label>
+      <label>ABRE ÀS<input id="holidayStart" type="time"></label>
+      <label>FECHA ÀS<input id="holidayEnd" type="time"></label>
+      <label class="holiday-note-field">OBSERVAÇÃO (OPCIONAL)<input id="holidayNote" type="text" maxlength="240" placeholder="Horário especial ou informação adicional"></label>
+      <button class="employee-primary" id="holidaySave" type="button">SALVAR FERIADO</button>
+    </div>
+    <div id="holidayCalendarList" class="holiday-calendar-list"><p class="holiday-empty">Carregando calendário...</p></div>
+  </section>
 
   <div class="employees-layout">
     <aside class="employee-list card">
@@ -203,5 +216,5 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script><script src="app.js?v=18.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script><script src="app.js?v=19.1"></script>
 </body></html>
