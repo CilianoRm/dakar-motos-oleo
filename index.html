@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Dakar Motos — Controle de Troca de Óleo</title>
-<link rel="stylesheet" href="style.css?v=17.0">
+<link rel="stylesheet" href="style.css?v=18.0">
 </head>
 <body><div class="app">
 <header><div class="brand"><img src="logo-dakar.jpg" alt="Dakar Motos"></div><div class="header-title">CONTROLE DE TROCA DE ÓLEO</div><div class="clock" id="clock"></div><button class="menu-btn" id="menuBtn" aria-label="Abrir menu">☰</button></header>
@@ -26,7 +26,7 @@
 <div class="divider"></div><div class="section-title center small">REGISTRAR AÇÃO</div>
 <div class="actions">
 <button class="action oil" id="oilBtn"><span class="action-label">TROCOU ÓLEO</span></button>
-<button class="action busy" id="busyBtn"><span class="action-label">-1 TROCA ÓLEO</span></button>
+<button class="action busy" id="busyBtn"><span class="action-label">OCUPADO</span></button>
 </div>
 
 <div class="hint">TROCOU ÓLEO registra +1. OCUPADO abre a correção e diminui 1 troca do mecânico escolhido.</div>
@@ -81,7 +81,7 @@
 
   <div class="employees-layout">
     <aside class="employee-list card">
-      <div class="section-title"><span>EQUIPE</span><button class="secondary manage-team-btn" id="manageEmployeesBtn" type="button">GERENCIAR</button></div>
+      <div class="section-title"><span>EQUIPE</span><div class="employee-team-actions"><button class="secondary manage-team-btn" id="importAttendanceBtn" type="button">IMPORTAR PONTO</button><button class="secondary manage-team-btn" id="manageEmployeesBtn" type="button">GERENCIAR</button></div></div>
       <div id="employeeList"></div>
     </aside>
 
@@ -149,6 +149,18 @@
   </div>
 </div>
 
+<!-- IMPORTAÇÃO DO RELATÓRIO KNUP KP-1028 -->
+<div class="schedule-modal hidden" id="knupImportModal" role="dialog" aria-modal="true" aria-labelledby="knupImportTitle">
+  <div class="schedule-box knup-import-box">
+    <div class="section-title" id="knupImportTitle">IMPORTAR PONTO — KNUP KP-1028 <button class="icon-btn" id="knupImportClose" type="button">×</button></div>
+    <p class="modal-help">Selecione o relatório exportado pelo relógio. O sistema lê as abas <b>1,2,3</b> e <b>4,5,6</b>, identifica funcionários e datas e prepara os horários para conferência.</p>
+    <label class="knup-file-label">ARQUIVO DO RELÓGIO<input id="knupFileInput" type="file" accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
+    <div id="knupImportStatus" class="knup-import-status">Nenhum arquivo selecionado.</div>
+    <div id="knupImportPreview" class="knup-import-preview"></div>
+    <div class="modal-actions"><button class="secondary" id="knupImportCancel" type="button">CANCELAR</button><button class="employee-primary" id="knupImportSave" type="button" disabled>IMPORTAR REGISTROS</button></div>
+  </div>
+</div>
+
 <!-- MODAL DE ALTERAÇÃO DE HORÁRIO -->
 <div class="schedule-modal hidden" id="scheduleModal">
   <div class="schedule-box">
@@ -191,5 +203,5 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="app.js?v=19.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script><script src="app.js?v=18.0"></script>
 </body></html>

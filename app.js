@@ -649,17 +649,22 @@ function monthBounds(){
 }
 
 function employeeMonthlyExpectedMinutes(employee){
-  // REFERÊNCIA DO BANCO DE HORAS.
-  // Não é 220h e não deve somar todos os dias do mês.
-  // Para este controle, o período integral usa 44h e o meio período 22h.
-  // Assim a referência fica próxima de 44h/22h e o excedente mostra
-  // exatamente quanto foi trabalhado acima ou abaixo dessa referência.
-  return jornadaWeeklyMinutes(employee);
+  const {first,last}=monthBounds();
+  let total=0;
+  for(const date of dateRangeDays(first,last)){
+    const type=effectiveDayType(employee.id,date);
+    // Folga/férias retiram carga prevista. Falta não retira: ela gera saldo negativo.
+    if(type==='folga' || type==='ferias' || type==='folga_ferias' || type==='feriado_trabalhado') continue;
+    total += expectedMinutes(employee,date,'trabalho');
+  }
+  return Math.round(total);
 }
 
 function standardMinutesForPeriod(employee, throughToday=true){
-  // A mesma referência usada na CARGA HORÁRIA MÊS.
-  return jornadaWeeklyMinutes(employee);
+  const {first,last}=monthBounds();
+  const end=throughToday ? localDateISO() : last;
+  const days=dateRangeDays(first,end).length;
+  return Math.round(jornadaWeeklyMinutes(employee)*(days/7));
 }
 
 function employeeMonthlyExcessMinutes(employee){
@@ -882,7 +887,7 @@ function renderEmployees() {
   list.querySelectorAll('.employee-list-item').forEach(b=>b.addEventListener('click',()=>{selectedEmployeeId=b.dataset.id;calendarMonth=new Date();selectedCalendarDate=localDateISO();renderEmployees();}));
   const e=employeeRows.find(x=>x.id===selectedEmployeeId);if(!e){detail.innerHTML='<p>Nenhum funcionário selecionado.</p>';return;}
   const viewDate=selectedCalendarDate||today, type=effectiveDayType(e.id,viewDate),p=getPoint(e.id,viewDate),expected=expectedMinutes(e,viewDate,'trabalho'),worked=(type==='trabalho'||type==='feriado_trabalhado')?workedMinutes(p,e):0,daily=type==='folga'||type==='ferias'?0:(type==='nao_veio'?-expected:(type==='feriado_trabalhado'?worked:worked-expected)),period=employeePeriodBalance(e.id),monthWorked=employeeMonthWorkedMinutes(e.id),monthExpected=employeeMonthlyExpectedMinutes(e),monthExcess=employeeMonthlyExcessMinutes(e),standardThroughToday=standardMinutesForPeriod(e,true),ledger=employeeDayLedger(e);
-  detail.innerHTML=`<div class="employee-detail-head"><div><span class="employee-tag">ATIVO</span><h1>${escapeHtml(e.nome)}</h1></div><div class="employee-head-actions"><button class="secondary" id="editScheduleBtn">ALTERAR HORÁRIOS</button></div></div><div class="schedule-summary"><div><b>HORÁRIOS POR DIA</b>${WEEKDAY_KEYS.map(cfg=>{const s=scheduleForKey(e,cfg.key);return `<span><strong>${cfg.label}:</strong> ${s?`${s.start.slice(0,5)} às ${s.end.slice(0,5)}`:'Não trabalha'}</span>`;}).join('')}</div><div><b>ALMOÇO DO DIA SELECIONADO</b><span>${scheduleFor(e,viewDate)?.lunchStart&&scheduleFor(e,viewDate)?.lunchEnd?`${scheduleFor(e,viewDate).lunchStart.slice(0,5)} às ${scheduleFor(e,viewDate).lunchEnd.slice(0,5)}`:'Sem horário de almoço'}</span></div><div><b>CARGA ESPERADA</b><span>${durationHuman(expected)}</span></div><div><b>CARGA HORÁRIA MÊS</b><span>${durationHuman(monthExpected)}</span><small class="schedule-subinfo">Referência do banco: 44:00 no integral ou 22:00 no meio período</small></div><div><b>CARGA HORÁRIA EXCEDENTE MÊS</b><span class="${monthExcess<0?'negative':'positive'}">${minutesToHuman(monthExcess)}</span><small class="schedule-subinfo">Referência ${jornadaLabel(e)}: ${durationHuman(standardThroughToday)}</small></div></div></div><div class="agenda-card"><button type="button" class="agenda-toggle" id="agendaToggle"><span>AGENDA DO FUNCIONÁRIO <small id="agendaSummaryText" class="agenda-summary-text"></small></span><span id="agendaToggleIcon">＋</span></button><div id="agendaBody" class="agenda-body collapsed"><div id="employeeCalendar" class="employee-calendar"></div><div id="agendaControls"></div></div></div><div class="attendance-card"><div class="section-title">REGISTRO DE HORÁRIOS <span>${formatDateBR(viewDate)}</span></div><div class="attendance-status-line">STATUS DO DIA: <strong>${agendaLabel(type)}</strong></div><div class="attendance-grid"><div><small>CHEGADA</small><strong>${fmtTime(p?.chegada)}</strong></div><div><small>SAÍDA ALMOÇO</small><strong>${fmtTime(p?.saida_almoco)}</strong></div><div><small>RETORNO</small><strong>${fmtTime(p?.retorno_almoco)}</strong></div><div><small>SAÍDA</small><strong>${fmtTime(p?.saida)}</strong></div></div><button class="employee-primary" id="attendanceBtn">LANÇAR HORÁRIOS</button><button class="secondary" id="clearAttendanceBtn">LIMPAR LANÇAMENTO DO DIA</button></div><div class="balance-grid"><div><small>HORAS TRABALHADAS</small><strong>${durationHuman(worked)}</strong></div><div><small>HORAS ESPERADAS</small><strong>${durationHuman(expected)}</strong></div><div><small>SALDO DO DIA</small><strong class="${daily<0?'negative':'positive'}">${minutesToHuman(daily)}</strong></div><div><small>SALDO NO MÊS</small><strong class="${period<0?'negative':'positive'}">${minutesToHuman(period)}</strong></div></div><div class="credit-summary"><div><small>DIAS DISPONÍVEIS</small><strong class="${ledger.remainingCredits>0?'positive':''}">${ledger.remainingCredits.toFixed(2)}</strong></div><div><small>FERIADOS TRABALHADOS</small><strong>${ledger.holidayCredits}</strong></div><div><small>HORAS EM CRÉDITO</small><strong>${ledger.hourCreditsDays.toFixed(2)} dia</strong></div><div><small>DIAS JÁ DEVIDOS</small><strong class="${ledger.manualDebtDays>0?'negative':'positive'}">${ledger.manualDebtDays.toFixed(2)}</strong></div><div><small>SALDO DISPONÍVEL</small><strong class="${ledger.netAvailableDays<0?'negative':'positive'}">${signedDaysAndMinutes(ledger.netAvailableDays,ledger.dailyBase)}</strong></div></div><div class="schedule-note-display">${escapeHtml(e.observacao||'')}</div>`;
+  detail.innerHTML=`<div class="employee-detail-head"><div><span class="employee-tag">ATIVO</span><h1>${escapeHtml(e.nome)}</h1></div><div class="employee-head-actions"><button class="secondary" id="editScheduleBtn">ALTERAR HORÁRIOS</button></div></div><div class="schedule-summary"><div><b>HORÁRIOS POR DIA</b>${WEEKDAY_KEYS.map(cfg=>{const s=scheduleForKey(e,cfg.key);return `<span><strong>${cfg.label}:</strong> ${s?`${s.start.slice(0,5)} às ${s.end.slice(0,5)}`:'Não trabalha'}</span>`;}).join('')}</div><div><b>ALMOÇO DO DIA SELECIONADO</b><span>${scheduleFor(e,viewDate)?.lunchStart&&scheduleFor(e,viewDate)?.lunchEnd?`${scheduleFor(e,viewDate).lunchStart.slice(0,5)} às ${scheduleFor(e,viewDate).lunchEnd.slice(0,5)}`:'Sem horário de almoço'}</span></div><div><b>CARGA ESPERADA</b><span>${durationHuman(expected)}</span></div><div><b>CARGA HORÁRIA MÊS</b><span>${durationHuman(monthExpected)}</span><small class="schedule-subinfo">Calculada pelo horário escolhido</small></div><div><b>CARGA HORÁRIA EXCEDENTE MÊS</b><span class="${monthExcess<0?'negative':'positive'}">${minutesToHuman(monthExcess)}</span><small class="schedule-subinfo">Padrão ${jornadaLabel(e)}: ${durationHuman(standardThroughToday)} até hoje</small></div></div></div><div class="agenda-card"><button type="button" class="agenda-toggle" id="agendaToggle"><span>AGENDA DO FUNCIONÁRIO <small id="agendaSummaryText" class="agenda-summary-text"></small></span><span id="agendaToggleIcon">＋</span></button><div id="agendaBody" class="agenda-body collapsed"><div id="employeeCalendar" class="employee-calendar"></div><div id="agendaControls"></div></div></div><div class="attendance-card"><div class="section-title">REGISTRO DE HORÁRIOS <span>${formatDateBR(viewDate)}</span></div><div class="attendance-status-line">STATUS DO DIA: <strong>${agendaLabel(type)}</strong></div><div class="attendance-grid"><div><small>CHEGADA</small><strong>${fmtTime(p?.chegada)}</strong></div><div><small>SAÍDA ALMOÇO</small><strong>${fmtTime(p?.saida_almoco)}</strong></div><div><small>RETORNO</small><strong>${fmtTime(p?.retorno_almoco)}</strong></div><div><small>SAÍDA</small><strong>${fmtTime(p?.saida)}</strong></div></div><button class="employee-primary" id="attendanceBtn">LANÇAR HORÁRIOS</button><button class="secondary" id="clearAttendanceBtn">LIMPAR LANÇAMENTO DO DIA</button></div><div class="balance-grid"><div><small>HORAS TRABALHADAS</small><strong>${durationHuman(worked)}</strong></div><div><small>HORAS ESPERADAS</small><strong>${durationHuman(expected)}</strong></div><div><small>SALDO DO DIA</small><strong class="${daily<0?'negative':'positive'}">${minutesToHuman(daily)}</strong></div><div><small>SALDO NO MÊS</small><strong class="${period<0?'negative':'positive'}">${minutesToHuman(period)}</strong></div></div><div class="credit-summary"><div><small>DIAS DISPONÍVEIS</small><strong class="${ledger.remainingCredits>0?'positive':''}">${ledger.remainingCredits.toFixed(2)}</strong></div><div><small>FERIADOS TRABALHADOS</small><strong>${ledger.holidayCredits}</strong></div><div><small>HORAS EM CRÉDITO</small><strong>${ledger.hourCreditsDays.toFixed(2)} dia</strong></div><div><small>DIAS JÁ DEVIDOS</small><strong class="${ledger.manualDebtDays>0?'negative':'positive'}">${ledger.manualDebtDays.toFixed(2)}</strong></div><div><small>SALDO DISPONÍVEL</small><strong class="${ledger.netAvailableDays<0?'negative':'positive'}">${signedDaysAndMinutes(ledger.netAvailableDays,ledger.dailyBase)}</strong></div></div><div class="schedule-note-display">${escapeHtml(e.observacao||'')}</div>`;
   renderEmployeeCalendar(e);renderAgendaControls(e);
   const agendaBody=$("agendaBody");
   const agendaIcon=$("agendaToggleIcon");
@@ -1045,9 +1050,9 @@ function openScheduleModal(employee) {
   $("scheduleJornadaTipo").value=jornadaType(employee);
   for (const cfg of WEEKDAY_KEYS) {
     const key = cfg.key;
+    const start = employee[`${key}_entrada`] || ((key !== 'sab' && key !== 'dom') ? employee.seg_sex_entrada : (key === 'sab' ? employee.sab_entrada : ''));
+    const end = employee[`${key}_saida`] || ((key !== 'sab' && key !== 'dom') ? employee.seg_sex_saida : (key === 'sab' ? employee.sab_saida : ''));
     const perDayFieldsExist = hasPerDayScheduleFields(employee,key);
-    const start = perDayFieldsExist ? (employee[`${key}_entrada`] || '') : ((key !== 'sab' && key !== 'dom') ? employee.seg_sex_entrada : (key === 'sab' ? employee.sab_entrada : ''));
-    const end = perDayFieldsExist ? (employee[`${key}_saida`] || '') : ((key !== 'sab' && key !== 'dom') ? employee.seg_sex_saida : (key === 'sab' ? employee.sab_saida : ''));
     // Depois da V14, o almoço é totalmente independente em cada dia.
     // O fallback antigo só é usado quando os campos por dia ainda não existem no banco.
     const lunchStart = perDayFieldsExist ? (employee[`${key}_almoco_inicio`] || '') :
@@ -1127,6 +1132,133 @@ function toggleEmployeePassword(){
   btn.setAttribute("title", showing ? "Mostrar senha" : "Ocultar senha");
 }
 
+
+// V18 — importação do relógio de ponto Knup KP-1028.
+let knupPendingRecords = [];
+let knupPendingUnmatched = [];
+function openKnupImport(){
+  if(!db) return toast('Banco de dados não conectado.');
+  knupPendingRecords=[]; knupPendingUnmatched=[];
+  $('knupFileInput').value=''; $('knupImportPreview').innerHTML='';
+  $('knupImportStatus').textContent='Selecione o arquivo .xls ou .xlsx exportado pelo Knup KP-1028.';
+  $('knupImportSave').disabled=true; $('knupImportModal').classList.remove('hidden');
+}
+function closeKnupImport(){ $('knupImportModal')?.classList.add('hidden'); }
+function normalizePersonName(v){ return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,''); }
+function matchKnupEmployee(name){
+  const n=normalizePersonName(name);
+  const aliases={
+    ciliano:['ciliano','cilianoc'], geovana:['geovana'], deiciane:['deiciane','deiciane'],
+    jessica:['jessica','jessicacaixjessi'], ezequiel:['ezequiel','ezequie','ezequielvendezequ'],
+    marcos:['marcos'], rubens:['rubens']
+  };
+  return employeeRows.find(e=>{
+    const en=normalizePersonName(e.nome);
+    if(en===n || en.startsWith(n) || n.startsWith(en)) return true;
+    return (aliases[en]||[]).some(a=>n===normalizePersonName(a)||n.startsWith(normalizePersonName(a))||normalizePersonName(a).startsWith(n));
+  })||null;
+}
+function knupCellText(ws,r,c){
+  const cell=ws[XLSX.utils.encode_cell({r,c})];
+  if(!cell || cell.v===undefined || cell.v===null) return '';
+  return String(cell.w!==undefined?cell.w:cell.v).trim();
+}
+function knupTime(value){
+  if(value===undefined||value===null||value==='') return null;
+  let s=String(value).trim();
+  if(!s) return null;
+  // O XLS pode entregar hora como fração de um dia.
+  if(typeof value==='number' || /^0?\.\d+$/.test(s)){
+    const fraction=Number(value); if(Number.isFinite(fraction)){const mins=Math.round((fraction%1)*1440);return `${String(Math.floor(mins/60)%24).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;}
+  }
+  const m=s.match(/(?:^|\s)(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?/);
+  if(!m) return null;
+  const h=Number(m[1]),min=Number(m[2]); if(h>23||min>59)return null;
+  return `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+}
+function knupReportDateRange(wb){
+  for(const sheetName of ['1,2,3','4,5,6']){
+    const ws=wb.Sheets[sheetName]; if(!ws)continue;
+    const lastCol=ws['!ref']?XLSX.utils.decode_range(ws['!ref']).e.c:0;
+    for(let r=0;r<5;r++)for(let c=0;c<=lastCol;c++){
+      const text=knupCellText(ws,r,c); const m=text.match(/(\d{2})\/(\d{2})\/(\d{4})\s*~\s*(\d{2})\/(\d{2})\/(\d{4})/);
+      if(m)return {start:`${m[3]}-${m[2]}-${m[1]}`,end:`${m[6]}-${m[5]}-${m[4]}`};
+    }
+  }
+  return null;
+}
+function parseKnupWorkbook(wb){
+  const parsed=[],unmatched=[]; const range=knupReportDateRange(wb);
+  for(const sheetName of ['1,2,3','4,5,6']){
+    const ws=wb.Sheets[sheetName]; if(!ws)continue;
+    const bounds=XLSX.utils.decode_range(ws['!ref']||'A1:A1');
+    for(const base of [0,15,30]){
+      const name=knupCellText(ws,3,base+9);
+      if(!name)continue;
+      const employee=matchKnupEmployee(name);
+      for(let r=12;r<=bounds.e.r;r++){
+        const dateLabel=knupCellText(ws,r,base);
+        const dm=dateLabel.match(/^\s*(\d{1,2})\b/); if(!dm)continue;
+        const day=Number(dm[1]); if(day<1||day>31)continue;
+        const sourceDate=range?.start||range?.end;
+        if(!sourceDate)continue;
+        const year=Number(sourceDate.slice(0,4)),month=Number(sourceDate.slice(5,7));
+        const date=`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        const times={
+          chegada:knupTime(knupCellText(ws,r,base+1)),
+          saida_almoco:knupTime(knupCellText(ws,r,base+3)),
+          retorno_almoco:knupTime(knupCellText(ws,r,base+6)),
+          saida:knupTime(knupCellText(ws,r,base+8))
+        };
+        if(!Object.values(times).some(Boolean))continue;
+        const record={name,employee,date,...times};
+        if(employee)parsed.push(record); else unmatched.push(record);
+      }
+    }
+  }
+  // Evita duplicações se a planilha repetir funcionário/data em mais de uma aba.
+  const unique=new Map();
+  for(const rec of parsed){const k=`${rec.employee.id}|${rec.date}`;const old=unique.get(k)||{...rec};for(const field of ['chegada','saida_almoco','retorno_almoco','saida'])if(rec[field])old[field]=rec[field];unique.set(k,old);}
+  return {records:[...unique.values()].sort((a,b)=>a.date.localeCompare(b.date)||String(a.employee.nome).localeCompare(String(b.employee.nome))),unmatched,range};
+}
+async function handleKnupFile(file){
+  if(!file)return;
+  $('knupImportSave').disabled=true; $('knupImportStatus').textContent='Lendo arquivo…'; $('knupImportPreview').innerHTML='';
+  try{
+    if(!window.XLSX)throw new Error('Leitor de Excel não carregou. Atualize a página e tente novamente.');
+    const data=await file.arrayBuffer(); const wb=XLSX.read(data,{type:'array',cellDates:false});
+    const result=parseKnupWorkbook(wb); knupPendingRecords=result.records;knupPendingUnmatched=result.unmatched;
+    const rangeText=result.range?`${formatDateBR(result.range.start)} a ${formatDateBR(result.range.end)}`:'período não identificado';
+    $('knupImportStatus').innerHTML=`Arquivo: <b>${escapeHtml(file.name)}</b><br>Período: <b>${rangeText}</b><br>Registros reconhecidos: <b>${result.records.length}</b> · Nomes sem correspondência: <b class="${result.unmatched.length?'knup-import-warn':'knup-import-good'}">${result.unmatched.length}</b>`;
+    if(!result.records.length){$('knupImportPreview').innerHTML='<p class="knup-import-warn">Nenhum registro de horário foi reconhecido. Confirme se o arquivo contém as abas “1,2,3” e “4,5,6” e se os nomes já existem no cadastro.</p>';return;}
+    const rows=result.records.slice(0,120).map(r=>`<tr><td>${formatDateBR(r.date)}</td><td>${escapeHtml(r.employee.nome)}</td><td>${r.chegada||'—'}</td><td>${r.saida_almoco||'—'}</td><td>${r.retorno_almoco||'—'}</td><td>${r.saida||'—'}</td></tr>`).join('');
+    const unmatched=result.unmatched.length?`<p class="knup-import-warn">Não reconhecidos: ${[...new Set(result.unmatched.map(x=>x.name))].map(escapeHtml).join(', ')}. Cadastre esses nomes ou ajuste a identificação antes de importar.</p>`:'';
+    $('knupImportPreview').innerHTML=`<p class="modal-help">Prévia dos primeiros ${Math.min(result.records.length,120)} registros. Campos vazios no relatório não apagam horários já salvos.</p><table class="knup-preview-table"><thead><tr><th>DATA</th><th>FUNCIONÁRIO</th><th>ENTRADA</th><th>SAÍDA ALMOÇO</th><th>RETORNO</th><th>SAÍDA</th></tr></thead><tbody>${rows}</tbody></table>${unmatched}`;
+    $('knupImportSave').disabled=result.records.length===0;
+  }catch(err){console.error('Importação Knup:',err);$('knupImportStatus').textContent=`Erro ao ler arquivo: ${err.message||err}`;}
+}
+async function importKnupRecords(){
+  if(!knupPendingRecords.length)return;
+  const btn=$('knupImportSave');btn.disabled=true;btn.textContent='IMPORTANDO…';
+  let saved=0,failed=0;const errors=[];
+  try{
+    for(const rec of knupPendingRecords){
+      try{
+        const existing=employeePoints.find(p=>String(p.funcionario_id)===String(rec.employee.id)&&p.data===rec.date)||{};
+        const makeDateTime=time=>time?`${rec.date}T${time}:00-03:00`:null;
+        const payload={funcionario_id:rec.employee.id,data:rec.date,tipo_dia:existing.tipo_dia||effectiveDayType(rec.employee.id,rec.date),updated_at:localDateTime()};
+        for(const field of ['chegada','saida_almoco','retorno_almoco','saida'])payload[field]=rec[field]?makeDateTime(rec[field]):(existing[field]||null);
+        const {error}=await db.from('pontos_funcionarios').upsert(payload,{onConflict:'funcionario_id,data'});
+        if(error)throw error;saved++;
+      }catch(err){failed++;errors.push(`${rec.employee.nome} ${formatDateBR(rec.date)}: ${err.message||err}`);}
+    }
+    await loadEmployees({silent:true});
+    $('knupImportStatus').innerHTML=`<b class="knup-import-good">Importação concluída: ${saved} registro(s) salvo(s).</b>${failed?`<br><span class="knup-import-warn">Falhas: ${failed}. ${escapeHtml(errors.slice(0,3).join(' | '))}</span>`:''}`;
+    $('knupImportPreview').innerHTML='';
+    if(!failed){toast(`${saved} registros de ponto importados.`);setTimeout(closeKnupImport,1000);}else toast(`Importados ${saved}; ${failed} falharam. Confira os detalhes.`);
+  }finally{btn.textContent='IMPORTAR REGISTROS';btn.disabled=knupPendingRecords.length===0;}
+}
+
 function setupEmployeeUI(){
   $("menuBtn")?.addEventListener("click",openMenu);
   $("menuClose")?.addEventListener("click",closeMenu);
@@ -1140,6 +1272,12 @@ function setupEmployeeUI(){
   $("employeePasswordToggle")?.addEventListener("click",toggleEmployeePassword);
   $("employeesBack")?.addEventListener("click",closeEmployees);
   $("manageEmployeesBtn")?.addEventListener("click",openEmployeeManager);
+  $("importAttendanceBtn")?.addEventListener("click",openKnupImport);
+  $("knupImportClose")?.addEventListener("click",closeKnupImport);
+  $("knupImportCancel")?.addEventListener("click",closeKnupImport);
+  $("knupImportModal")?.addEventListener("click",e=>{if(e.target.id==="knupImportModal")closeKnupImport();});
+  $("knupFileInput")?.addEventListener("change",e=>handleKnupFile(e.target.files?.[0]));
+  $("knupImportSave")?.addEventListener("click",importKnupRecords);
   $("employeeManagerClose")?.addEventListener("click",closeEmployeeManager);
   $("employeeManagerCancel")?.addEventListener("click",closeEmployeeManager);
   $("employeeManagerAdd")?.addEventListener("click",addEmployee);
