@@ -282,7 +282,6 @@ function subscribe() {
     .on("postgres_changes", { event:"*", schema:"public", table:"funcionarios" }, () => loadEmployees({silent:true}))
     .on("postgres_changes", { event:"*", schema:"public", table:"pontos_funcionarios" }, () => loadEmployees({silent:true}))
     .on("postgres_changes", { event:"*", schema:"public", table:"agenda_funcionarios" }, () => loadEmployees({silent:true}))
-    .on("postgres_changes", { event:"*", schema:"public", table:"feriados_empresa" }, () => loadEmployees({silent:true}))
     .on("postgres_changes", { event:"*", schema:"public", table:"agenda_mecanicos" }, () => loadMechanicsAgenda({silent:true}))
     .subscribe(status => {
       console.log("Dakar Motos Realtime:", status);
@@ -394,8 +393,6 @@ document.addEventListener("DOMContentLoaded", init);
 const EMPLOYEE_PASSWORD = "Marcos8904";
 let employeeRows = [];
 let employeePoints = [];
-let companyHolidays = [];
-let holidayTableReady = true;
 let selectedEmployeeId = "CILIANO";
 let employeeChannel = null;
 let mechanicAgendaRows = [];
@@ -492,7 +489,7 @@ function scheduleFor(employee, dateStr = localDateISO()) {
 }
 
 function expectedMinutes(employee, dateStr = localDateISO(), tipoDia = 'trabalho') {
-  if (tipoDia === 'feriado' || tipoDia === 'feriado_trabalhado') return 0;
+  if (tipoDia === 'feriado_trabalhado') return 0;
   if (tipoDia === 'folga_ferias') return 0;
   const s = scheduleFor(employee,dateStr);
   if (!s) return 0;
@@ -526,41 +523,35 @@ function getPoint(id, date = localDateISO()) {
 function getAgenda(id, date = localDateISO()) {
   return employeeAgenda.find(a => a.funcionario_id === id && a.data === date) || null;
 }
-function getCompanyHoliday(date) { return companyHolidays.find(h => h.data === date) || null; }
 function effectiveDayType(id, date = localDateISO()) {
-  const a = getAgenda(id,date), p = getPoint(id,date), holiday = getCompanyHoliday(date);
-  // Feriado global: basta existir uma entrada registrada para gerar 1 dia de crédito,
-  // independentemente da duração do turno ou de haver saída registrada.
-  if (holiday) return p?.chegada ? 'feriado_trabalhado' : 'feriado';
+  const a = getAgenda(id,date);
   if (a?.tipo) return a.tipo;
+  const p = getPoint(id,date);
   return p?.tipo_dia || 'trabalho';
 }
-function agendaLabel(type){ return {trabalho:'TRABALHO',folga:'FOLGA',ferias:'FÉRIAS',feriado:'FERIADO',feriado_trabalhado:'FERIADO TRABALHADO',nao_veio:'NÃO VEIO'}[type] || 'TRABALHO'; }
+function agendaLabel(type){ return {trabalho:'TRABALHO',folga:'FOLGA',ferias:'FÉRIAS',feriado_trabalhado:'FERIADO TRABALHADO',nao_veio:'NÃO VEIO'}[type] || 'TRABALHO'; }
 
 function isCreditType(type){ return type === 'feriado_trabalhado' || type === 'folga_ferias' || type === 'folga' || type === 'ferias'; }
 function pointCreditDays(point, employee){
   if (!point) return 0;
-  return getCompanyHoliday(point.data) && point.chegada ? 1 : (point.tipo_dia === 'feriado_trabalhado' ? 1 : 0);
+  if (point.tipo_dia === 'feriado_trabalhado') return 1;
+  return 0;
 }
 
 async function loadEmployees({silent=false}={}) {
   if (!db) return;
   try {
-    const [emps, points, agenda, holidays] = await Promise.all([
+    const [emps, points, agenda] = await Promise.all([
       db.from("funcionarios").select("*").eq("ativo",true).order("nome"),
       db.from("pontos_funcionarios").select("*").order("data",{ascending:false}),
-      db.from("agenda_funcionarios").select("*").order("data",{ascending:true}),
-      db.from("feriados_empresa").select("*").order("data",{ascending:true})
+      db.from("agenda_funcionarios").select("*").order("data",{ascending:true})
     ]);
     if (emps.error) throw emps.error;
     if (points.error) throw points.error;
     if (agenda.error) throw agenda.error;
-    holidayTableReady = !holidays.error;
-    companyHolidays = holidays.error ? [] : (holidays.data || []);
     employeeRows = emps.data || [];
     employeePoints = points.data || [];
     employeeAgenda = agenda.data || [];
-    renderHolidayCalendar();
     if (!employeeRows.some(e=>e.id===selectedEmployeeId)) selectedEmployeeId = employeeRows[0]?.id || "";
     renderEmployees();
     if(!$('employeeManagerModal')?.classList.contains('hidden')) renderEmployeeManager();
@@ -594,12 +585,12 @@ function employeePeriodBalance(employeeId) {
     const isToday = date === today;
     const agenda = getAgenda(employeeId, date);
     const point = getPoint(employeeId, date);
-    const type = effectiveDayType(employeeId, date);
+    const type = agenda?.tipo || point?.tipo_dia || 'trabalho';
 
     // Nunca contabiliza o dia corrente antes da saída.
     if (isToday && !point?.saida) continue;
 
-    if (type === 'feriado' || type === 'folga' || type === 'ferias' || type === 'folga_ferias') continue;
+    if (type === 'folga' || type === 'ferias' || type === 'folga_ferias') continue;
 
     const expected = expectedMinutes(employee, date, type);
 
@@ -663,7 +654,7 @@ function employeeMonthlyExpectedMinutes(employee){
   for(const date of dateRangeDays(first,last)){
     const type=effectiveDayType(employee.id,date);
     // Folga/férias retiram carga prevista. Falta não retira: ela gera saldo negativo.
-    if(type==='folga' || type==='ferias' || type==='folga_ferias' || type==='feriado' || type==='feriado_trabalhado') continue;
+    if(type==='folga' || type==='ferias' || type==='folga_ferias' || type==='feriado_trabalhado') continue;
     total += expectedMinutes(employee,date,'trabalho');
   }
   return Math.round(total);
@@ -710,16 +701,15 @@ function employeeDayLedger(employee){
 
   // Agenda tem prioridade para o tipo do dia. Isso faz FÉRIAS/FOLGA marcadas
   // no calendário reduzirem imediatamente os dias disponíveis.
-  const dates = new Set([...rows.map(p=>p.data), ...agendaRows.map(a=>a.data), ...companyHolidays.map(h=>h.data)]);
+  const dates = new Set([...rows.map(p=>p.data), ...agendaRows.map(a=>a.data)]);
   for(const date of dates){
     const p = rows.find(x=>x.data===date) || null;
     const agenda = getAgenda(employee.id,date);
-    const type = effectiveDayType(employee.id,date);
+    const type = agenda?.tipo || p?.tipo_dia || 'trabalho';
     const dailyExpected = expectedMinutes(employee,date,'trabalho');
 
     if(type==='nao_veio') absenceMinutes += dailyExpected;
     else if(type==='feriado_trabalhado') holidayCredits += 1;
-    else if(type==='feriado') continue;
     else if(type==='folga' || type==='ferias' || type==='folga_ferias') usedLeave += 1;
     else if(p?.saida) {
       const bal=workedMinutes(p,employee,new Date())-dailyExpected;
@@ -750,13 +740,12 @@ function renderEmployeeCalendar(employee){
   const y=calendarMonth.getFullYear(),m=calendarMonth.getMonth(),first=new Date(y,m,1),start=(first.getDay()+6)%7,daysIn=new Date(y,m+1,0).getDate(),cells=[];
   for(let i=0;i<start;i++)cells.push('<div class="calendar-day empty"></div>');
   for(let day=1;day<=daysIn;day++){
-    const date=`${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`,p=getPoint(employee.id,date),a=getAgenda(employee.id,date),type=effectiveDayType(employee.id,date);
-    const expected=expectedMinutes(employee,date,type),worked=(type==='trabalho'||type==='feriado_trabalhado')?workedMinutes(p,employee):0,bal=type==='trabalho'?worked-expected:(type==='feriado_trabalhado'?worked:0);
+    const date=`${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`,p=getPoint(employee.id,date),a=getAgenda(employee.id,date),type=a?.tipo||p?.tipo_dia||null;
+    const expected=expectedMinutes(employee,date,'trabalho'),worked=(type==='trabalho'||type==='feriado_trabalhado')?workedMinutes(p,employee):0,bal=type==='trabalho'?worked-expected:(type==='feriado_trabalhado'?worked:0);
     let badge='';
-    if(type==='feriado')badge='<span class="calendar-badge holiday">FERIADO</span>';
-    else if(type==='folga')badge='<span class="calendar-badge off">FOLGA</span>';
+    if(type==='folga')badge='<span class="calendar-badge off">FOLGA</span>';
     else if(type==='ferias')badge='<span class="calendar-badge vacation">FÉRIAS</span>';
-    else if(type==='feriado_trabalhado')badge='<span class="calendar-badge holiday">FERIADO TRAB.</span>';
+    else if(type==='feriado_trabalhado')badge='<span class="calendar-badge holiday">FERIADO</span>';
     else if(type==='nao_veio')badge='<span class="calendar-badge absence">FALTOU</span>';
     else if(p&&(p.chegada||p.saida))badge=`<span class="calendar-badge ${bal<0?'less':'more'}">${minutesToHuman(bal)}</span>`;
     else if(!scheduleFor(employee,date))badge='<span class="calendar-badge weekend">NÃO TRABALHA</span>';
@@ -815,7 +804,7 @@ async function clearAgendaDay(employee,date){
 function renderAgendaControls(employee){
   const host=$("agendaControls");if(!host)return;
   const date=selectedCalendarDate,type=effectiveDayType(employee.id,date),a=getAgenda(employee.id,date),p=getPoint(employee.id,date),credit=Number(employee.dias_folga_ferias||0),debt=Number(employee.dias_devidos||0);
-  host.innerHTML=`<div class="agenda-selected"><div><small>DIA SELECIONADO</small><strong>${formatDateBR(date)}</strong></div><div><small>SITUAÇÃO</small><strong>${agendaLabel(type)}</strong></div><div><small>LANÇAMENTO</small><strong>${p?'PONTO REGISTRADO':'SEM PONTO'}</strong></div></div>${holiday?`<p class="holiday-note">FERIADO GERAL: ${escapeHtml(holiday.nome)}${holiday.horario_inicio&&holiday.horario_fim?` • horário ${holiday.horario_inicio.slice(0,5)}–${holiday.horario_fim.slice(0,5)}`:''}</p>`:''}<div class="agenda-buttons"><button class="secondary" data-agenda="folga">FOLGA</button><button class="secondary" data-agenda="ferias">FÉRIAS</button><button class="secondary" data-agenda="nao_veio">NÃO VEIO</button>${a?'<button class="danger-secondary" id="clearAgenda">LIMPAR DIA</button>':''}</div><div class="credit-editor"><label>DIAS DE FOLGA/FÉRIAS DISPONÍVEIS<input id="creditDaysScreen" type="number" min="0" step="0.5" value="${credit}"></label><label>DIAS QUE JÁ DEVE / FALTAS ANTERIORES<input id="debtDaysScreen" type="number" min="0" step="0.5" value="${debt}"></label><button class="secondary" id="saveCreditsAndDebt">SALVAR SALDOS</button></div><p class="agenda-help">Defina dias anteriores ou futuros pelo calendário. O saldo inicial de dias devidos pode ser informado aqui e será compensado por folgas/férias disponíveis, feriados trabalhados e créditos de horas.</p>`;
+  host.innerHTML=`<div class="agenda-selected"><div><small>DIA SELECIONADO</small><strong>${formatDateBR(date)}</strong></div><div><small>SITUAÇÃO</small><strong>${agendaLabel(type)}</strong></div><div><small>LANÇAMENTO</small><strong>${p?'PONTO REGISTRADO':'SEM PONTO'}</strong></div></div><div class="agenda-buttons"><button class="secondary" data-agenda="trabalho">TRABALHO</button><button class="secondary" data-agenda="folga">FOLGA</button><button class="secondary" data-agenda="ferias">FÉRIAS</button><button class="secondary" data-agenda="feriado_trabalhado">FERIADO TRABALHADO</button><button class="secondary" data-agenda="nao_veio">NÃO VEIO</button>${a?'<button class="danger-secondary" id="clearAgenda">LIMPAR DIA</button>':''}</div><div class="credit-editor"><label>DIAS DE FOLGA/FÉRIAS DISPONÍVEIS<input id="creditDaysScreen" type="number" min="0" step="0.5" value="${credit}"></label><label>DIAS QUE JÁ DEVE / FALTAS ANTERIORES<input id="debtDaysScreen" type="number" min="0" step="0.5" value="${debt}"></label><button class="secondary" id="saveCreditsAndDebt">SALVAR SALDOS</button></div><p class="agenda-help">Defina dias anteriores ou futuros pelo calendário. O saldo inicial de dias devidos pode ser informado aqui e será compensado por folgas/férias disponíveis, feriados trabalhados e créditos de horas.</p>`;
   host.querySelectorAll('[data-agenda]').forEach(btn=>btn.addEventListener('click',()=>setAgendaDay(employee,date,btn.dataset.agenda)));
   $("clearAgenda")?.addEventListener('click',()=>clearAgendaDay(employee,date));
   $("saveCreditsAndDebt")?.addEventListener('click',async()=>{const val=Math.max(0,Number($("creditDaysScreen").value||0)),debtVal=Math.max(0,Number($("debtDaysScreen").value||0));try{const r=await db.from('funcionarios').update({dias_folga_ferias:val,dias_devidos:debtVal,updated_at:new Date().toISOString()}).eq('id',employee.id);if(r.error)throw r.error;employee.dias_folga_ferias=val;employee.dias_devidos=debtVal;renderEmployees();toast('Saldos de dias atualizados.');}catch(e){console.error(e);toast('Erro ao salvar saldos. Execute o SQL da V11 no Supabase.');}});
@@ -897,7 +886,7 @@ function renderEmployees() {
   list.innerHTML=employeeRows.map(e=>{const type=effectiveDayType(e.id,today),p=getPoint(e.id,today),completed=!!p?.saida,bal=type==='trabalho'&&completed?workedMinutes(p,e)-expectedMinutes(e,today,'trabalho'):(type==='feriado_trabalhado'&&completed?workedMinutes(p,e):0);return `<button class="employee-list-item ${e.id===selectedEmployeeId?'active':''}" type="button" data-id="${e.id}"><span>${escapeHtml(e.nome)}</span><small class="${bal<0?'negative':'positive'}">${completed?minutesToHuman(bal):agendaLabel(type)}</small></button>`;}).join('')||'<div class="empty-employees">Nenhum funcionário encontrado.</div>';
   list.querySelectorAll('.employee-list-item').forEach(b=>b.addEventListener('click',()=>{selectedEmployeeId=b.dataset.id;calendarMonth=new Date();selectedCalendarDate=localDateISO();renderEmployees();}));
   const e=employeeRows.find(x=>x.id===selectedEmployeeId);if(!e){detail.innerHTML='<p>Nenhum funcionário selecionado.</p>';return;}
-  const viewDate=selectedCalendarDate||today, type=effectiveDayType(e.id,viewDate),p=getPoint(e.id,viewDate),expected=expectedMinutes(e,viewDate,type),worked=(type==='trabalho'||type==='feriado_trabalhado')?workedMinutes(p,e):0,daily=type==='folga'||type==='ferias'||type==='feriado'?0:(type==='nao_veio'?-expected:(type==='feriado_trabalhado'?worked:worked-expected)),period=employeePeriodBalance(e.id),monthWorked=employeeMonthWorkedMinutes(e.id),monthExpected=employeeMonthlyExpectedMinutes(e),monthExcess=employeeMonthlyExcessMinutes(e),standardThroughToday=standardMinutesForPeriod(e,true),ledger=employeeDayLedger(e);
+  const viewDate=selectedCalendarDate||today, type=effectiveDayType(e.id,viewDate),p=getPoint(e.id,viewDate),expected=expectedMinutes(e,viewDate,'trabalho'),worked=(type==='trabalho'||type==='feriado_trabalhado')?workedMinutes(p,e):0,daily=type==='folga'||type==='ferias'?0:(type==='nao_veio'?-expected:(type==='feriado_trabalhado'?worked:worked-expected)),period=employeePeriodBalance(e.id),monthWorked=employeeMonthWorkedMinutes(e.id),monthExpected=employeeMonthlyExpectedMinutes(e),monthExcess=employeeMonthlyExcessMinutes(e),standardThroughToday=standardMinutesForPeriod(e,true),ledger=employeeDayLedger(e);
   detail.innerHTML=`<div class="employee-detail-head"><div><span class="employee-tag">ATIVO</span><h1>${escapeHtml(e.nome)}</h1></div><div class="employee-head-actions"><button class="secondary" id="editScheduleBtn">ALTERAR HORÁRIOS</button></div></div><div class="schedule-summary"><div><b>HORÁRIOS POR DIA</b>${WEEKDAY_KEYS.map(cfg=>{const s=scheduleForKey(e,cfg.key);return `<span><strong>${cfg.label}:</strong> ${s?`${s.start.slice(0,5)} às ${s.end.slice(0,5)}`:'Não trabalha'}</span>`;}).join('')}</div><div><b>ALMOÇO DO DIA SELECIONADO</b><span>${scheduleFor(e,viewDate)?.lunchStart&&scheduleFor(e,viewDate)?.lunchEnd?`${scheduleFor(e,viewDate).lunchStart.slice(0,5)} às ${scheduleFor(e,viewDate).lunchEnd.slice(0,5)}`:'Sem horário de almoço'}</span></div><div><b>CARGA ESPERADA</b><span>${durationHuman(expected)}</span></div><div><b>CARGA HORÁRIA MÊS</b><span>${durationHuman(monthExpected)}</span><small class="schedule-subinfo">Calculada pelo horário escolhido</small></div><div><b>CARGA HORÁRIA EXCEDENTE MÊS</b><span class="${monthExcess<0?'negative':'positive'}">${minutesToHuman(monthExcess)}</span><small class="schedule-subinfo">Padrão ${jornadaLabel(e)}: ${durationHuman(standardThroughToday)} até hoje</small></div></div></div><div class="agenda-card"><button type="button" class="agenda-toggle" id="agendaToggle"><span>AGENDA DO FUNCIONÁRIO <small id="agendaSummaryText" class="agenda-summary-text"></small></span><span id="agendaToggleIcon">＋</span></button><div id="agendaBody" class="agenda-body collapsed"><div id="employeeCalendar" class="employee-calendar"></div><div id="agendaControls"></div></div></div><div class="attendance-card"><div class="section-title">REGISTRO DE HORÁRIOS <span>${formatDateBR(viewDate)}</span></div><div class="attendance-status-line">STATUS DO DIA: <strong>${agendaLabel(type)}</strong></div><div class="attendance-grid"><div><small>CHEGADA</small><strong>${fmtTime(p?.chegada)}</strong></div><div><small>SAÍDA ALMOÇO</small><strong>${fmtTime(p?.saida_almoco)}</strong></div><div><small>RETORNO</small><strong>${fmtTime(p?.retorno_almoco)}</strong></div><div><small>SAÍDA</small><strong>${fmtTime(p?.saida)}</strong></div></div><button class="employee-primary" id="attendanceBtn">LANÇAR HORÁRIOS</button><button class="secondary" id="clearAttendanceBtn">LIMPAR LANÇAMENTO DO DIA</button></div><div class="balance-grid"><div><small>HORAS TRABALHADAS</small><strong>${durationHuman(worked)}</strong></div><div><small>HORAS ESPERADAS</small><strong>${durationHuman(expected)}</strong></div><div><small>SALDO DO DIA</small><strong class="${daily<0?'negative':'positive'}">${minutesToHuman(daily)}</strong></div><div><small>SALDO NO MÊS</small><strong class="${period<0?'negative':'positive'}">${minutesToHuman(period)}</strong></div></div><div class="credit-summary"><div><small>DIAS DISPONÍVEIS</small><strong class="${ledger.remainingCredits>0?'positive':''}">${ledger.remainingCredits.toFixed(2)}</strong></div><div><small>FERIADOS TRABALHADOS</small><strong>${ledger.holidayCredits}</strong></div><div><small>HORAS EM CRÉDITO</small><strong>${ledger.hourCreditsDays.toFixed(2)} dia</strong></div><div><small>DIAS JÁ DEVIDOS</small><strong class="${ledger.manualDebtDays>0?'negative':'positive'}">${ledger.manualDebtDays.toFixed(2)}</strong></div><div><small>SALDO DISPONÍVEL</small><strong class="${ledger.netAvailableDays<0?'negative':'positive'}">${signedDaysAndMinutes(ledger.netAvailableDays,ledger.dailyBase)}</strong></div></div><div class="schedule-note-display">${escapeHtml(e.observacao||'')}</div>`;
   renderEmployeeCalendar(e);renderAgendaControls(e);
   const agendaBody=$("agendaBody");
@@ -1230,31 +1219,7 @@ function parseKnupWorkbook(wb){
   // Evita duplicações se a planilha repetir funcionário/data em mais de uma aba.
   const unique=new Map();
   for(const rec of parsed){const k=`${rec.employee.id}|${rec.date}`;const old=unique.get(k)||{...rec};for(const field of ['chegada','saida_almoco','retorno_almoco','saida'])if(rec[field])old[field]=rec[field];unique.set(k,old);}
-  // O Knup às vezes classifica a segunda batida do dia como SAÍDA ALMOÇO,
-  // mesmo quando ela é a saída definitiva. Com apenas entrada + uma outra
-  // batida, tratamos essa única batida como SAÍDA.
-  for(const rec of unique.values()) normalizeKnupRecordTimes(rec);
   return {records:[...unique.values()].sort((a,b)=>a.date.localeCompare(b.date)||String(a.employee.nome).localeCompare(String(b.employee.nome))),unmatched,range};
-}
-function normalizeKnupRecordTimes(rec){
-  if(!rec?.chegada) return rec;
-  const exits=['saida_almoco','retorno_almoco','saida'].filter(field=>rec[field]);
-  if(exits.length===1 && exits[0]!=='saida'){
-    rec.saida=rec[exits[0]];
-    rec.saida_almoco=null;
-    rec.retorno_almoco=null;
-  }
-  return rec;
-}
-function normalizeKnupPayload(payload){
-  if(!payload?.chegada) return payload;
-  const exits=['saida_almoco','retorno_almoco','saida'].filter(field=>payload[field]);
-  if(exits.length===1 && exits[0]!=='saida'){
-    payload.saida=payload[exits[0]];
-    payload.saida_almoco=null;
-    payload.retorno_almoco=null;
-  }
-  return payload;
 }
 async function handleKnupFile(file){
   if(!file)return;
@@ -1283,7 +1248,6 @@ async function importKnupRecords(){
         const makeDateTime=time=>time?`${rec.date}T${time}:00-03:00`:null;
         const payload={funcionario_id:rec.employee.id,data:rec.date,tipo_dia:existing.tipo_dia||effectiveDayType(rec.employee.id,rec.date),updated_at:localDateTime()};
         for(const field of ['chegada','saida_almoco','retorno_almoco','saida'])payload[field]=rec[field]?makeDateTime(rec[field]):(existing[field]||null);
-        normalizeKnupPayload(payload);
         const {error}=await db.from('pontos_funcionarios').upsert(payload,{onConflict:'funcionario_id,data'});
         if(error)throw error;saved++;
       }catch(err){failed++;errors.push(`${rec.employee.nome} ${formatDateBR(rec.date)}: ${err.message||err}`);}
@@ -1295,34 +1259,7 @@ async function importKnupRecords(){
   }finally{btn.textContent='IMPORTAR REGISTROS';btn.disabled=knupPendingRecords.length===0;}
 }
 
-function renderHolidayCalendar(){
-  const list=$('holidayCalendarList'); if(!list)return;
-  const date=$('holidayDate'); if(date&&!date.value)date.value=localDateISO();
-  if(!holidayTableReady){list.innerHTML='<p class="holiday-empty">Para ativar o calendário compartilhado, aplique uma única vez o arquivo <b>feriados_empresa_v19.sql</b> no Supabase.</p>';return;}
-  if(!companyHolidays.length){list.innerHTML='<p class="holiday-empty">Nenhum feriado cadastrado ainda.</p>';return;}
-  list.innerHTML=companyHolidays.slice().sort((a,b)=>a.data.localeCompare(b.data)).map(h=>`<div class="holiday-row"><div><strong>${formatDateBR(h.data)} — ${escapeHtml(h.nome||'Feriado')}</strong><small>${h.horario_inicio&&h.horario_fim?`Funcionamento: ${String(h.horario_inicio).slice(0,5)} às ${String(h.horario_fim).slice(0,5)}`:'Horário especial não definido'}</small>${h.observacao?`<small>${escapeHtml(h.observacao)}</small>`:''}</div><button type="button" class="danger-secondary" data-delete-holiday="${h.id}">EXCLUIR</button></div>`).join('');
-  list.querySelectorAll('[data-delete-holiday]').forEach(b=>b.addEventListener('click',()=>deleteCompanyHoliday(b.dataset.deleteHoliday)));
-}
-async function saveCompanyHoliday(){
-  if(!db)return toast('Supabase não conectado.');
-  if(!holidayTableReady)return toast('Aplique uma única vez feriados_empresa_v19.sql no Supabase para ativar o calendário.');
-  const data=$('holidayDate')?.value, nome=$('holidayName')?.value.trim();
-  if(!data||!nome)return toast('Informe a data e o nome do feriado.');
-  const inicio=$('holidayStart')?.value||null, fim=$('holidayEnd')?.value||null;
-  if((inicio&&!fim)||(!inicio&&fim))return toast('Preencha os dois horários ou deixe ambos vazios.');
-  if(inicio&&fim&&fim<=inicio)return toast('O horário final precisa ser posterior ao inicial.');
-  const payload={data,nome,horario_inicio:inicio,horario_fim:fim,observacao:$('holidayNote')?.value.trim()||null,updated_at:new Date().toISOString()};
-  try{const r=await db.from('feriados_empresa').upsert(payload,{onConflict:'data'}).select().single();if(r.error)throw r.error;const i=companyHolidays.findIndex(h=>h.data===data);if(i>=0)companyHolidays[i]=r.data;else companyHolidays.push(r.data);$('holidayName').value='';$('holidayStart').value='';$('holidayEnd').value='';$('holidayNote').value='';renderHolidayCalendar();renderEmployees();toast('Feriado salvo no calendário geral.');}
-  catch(e){console.error(e);toast('Não foi possível salvar. Confira a migração feriados_empresa_v19.sql no Supabase.');}
-}
-async function deleteCompanyHoliday(id){
-  if(!db||!confirm('Excluir este feriado do calendário geral?'))return;
-  try{const r=await db.from('feriados_empresa').delete().eq('id',id);if(r.error)throw r.error;companyHolidays=companyHolidays.filter(h=>h.id!==id);renderHolidayCalendar();renderEmployees();toast('Feriado excluído.');}
-  catch(e){console.error(e);toast('Não foi possível excluir o feriado.');}
-}
-
 function setupEmployeeUI(){
-  $("holidaySave")?.addEventListener("click",saveCompanyHoliday);
   $("menuBtn")?.addEventListener("click",openMenu);
   $("menuClose")?.addEventListener("click",closeMenu);
   $("menuOverlay")?.addEventListener("click",e=>{if(e.target.id==="menuOverlay")closeMenu();});
