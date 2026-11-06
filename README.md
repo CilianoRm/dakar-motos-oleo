@@ -38,3 +38,9 @@ Para uma base existente, execute uma única vez `employee_jornada_v16.sql` no SQ
 - Se o relatório trouxer somente uma entrada e uma segunda batida no dia, o sistema entende essa segunda batida como **SAÍDA**, mesmo quando o Knup a colocou na coluna **SAÍDA ALMOÇO** (ou em outra coluna de saída).
 - Se houver duas ou mais batidas de saída, a classificação original de almoço/retorno/saída é preservada.
 - Atualize os arquivos do site pelo ZIP completo e faça recarga forçada com **Ctrl+F5**.
+
+## V19.2 — correções da agenda e calendário geral
+- Corrigido erro JavaScript na área de agenda do funcionário que impedia a abertura/seleção de datas (referência incorreta à variável do feriado).
+- O calendário geral de feriados agora inicia minimizado e abre/fecha pelo cabeçalho.
+- Cada feriado cadastrado pode ser editado, inclusive data, nome, horário de abertura/fechamento e observação.
+- A edição atualiza o registro existente, inclusive quando a data é alterada.

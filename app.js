@@ -814,7 +814,7 @@ async function clearAgendaDay(employee,date){
 }
 function renderAgendaControls(employee){
   const host=$("agendaControls");if(!host)return;
-  const date=selectedCalendarDate,type=effectiveDayType(employee.id,date),a=getAgenda(employee.id,date),p=getPoint(employee.id,date),credit=Number(employee.dias_folga_ferias||0),debt=Number(employee.dias_devidos||0);
+  const date=selectedCalendarDate,type=effectiveDayType(employee.id,date),a=getAgenda(employee.id,date),p=getPoint(employee.id,date),holiday=getCompanyHoliday(date),credit=Number(employee.dias_folga_ferias||0),debt=Number(employee.dias_devidos||0);
   host.innerHTML=`<div class="agenda-selected"><div><small>DIA SELECIONADO</small><strong>${formatDateBR(date)}</strong></div><div><small>SITUAÇÃO</small><strong>${agendaLabel(type)}</strong></div><div><small>LANÇAMENTO</small><strong>${p?'PONTO REGISTRADO':'SEM PONTO'}</strong></div></div>${holiday?`<p class="holiday-note">FERIADO GERAL: ${escapeHtml(holiday.nome)}${holiday.horario_inicio&&holiday.horario_fim?` • horário ${holiday.horario_inicio.slice(0,5)}–${holiday.horario_fim.slice(0,5)}`:''}</p>`:''}<div class="agenda-buttons"><button class="secondary" data-agenda="folga">FOLGA</button><button class="secondary" data-agenda="ferias">FÉRIAS</button><button class="secondary" data-agenda="nao_veio">NÃO VEIO</button>${a?'<button class="danger-secondary" id="clearAgenda">LIMPAR DIA</button>':''}</div><div class="credit-editor"><label>DIAS DE FOLGA/FÉRIAS DISPONÍVEIS<input id="creditDaysScreen" type="number" min="0" step="0.5" value="${credit}"></label><label>DIAS QUE JÁ DEVE / FALTAS ANTERIORES<input id="debtDaysScreen" type="number" min="0" step="0.5" value="${debt}"></label><button class="secondary" id="saveCreditsAndDebt">SALVAR SALDOS</button></div><p class="agenda-help">Defina dias anteriores ou futuros pelo calendário. O saldo inicial de dias devidos pode ser informado aqui e será compensado por folgas/férias disponíveis, feriados trabalhados e créditos de horas.</p>`;
   host.querySelectorAll('[data-agenda]').forEach(btn=>btn.addEventListener('click',()=>setAgendaDay(employee,date,btn.dataset.agenda)));
   $("clearAgenda")?.addEventListener('click',()=>clearAgendaDay(employee,date));
@@ -1300,9 +1300,23 @@ function renderHolidayCalendar(){
   const date=$('holidayDate'); if(date&&!date.value)date.value=localDateISO();
   if(!holidayTableReady){list.innerHTML='<p class="holiday-empty">Para ativar o calendário compartilhado, aplique uma única vez o arquivo <b>feriados_empresa_v19.sql</b> no Supabase.</p>';return;}
   if(!companyHolidays.length){list.innerHTML='<p class="holiday-empty">Nenhum feriado cadastrado ainda.</p>';return;}
-  list.innerHTML=companyHolidays.slice().sort((a,b)=>a.data.localeCompare(b.data)).map(h=>`<div class="holiday-row"><div><strong>${formatDateBR(h.data)} — ${escapeHtml(h.nome||'Feriado')}</strong><small>${h.horario_inicio&&h.horario_fim?`Funcionamento: ${String(h.horario_inicio).slice(0,5)} às ${String(h.horario_fim).slice(0,5)}`:'Horário especial não definido'}</small>${h.observacao?`<small>${escapeHtml(h.observacao)}</small>`:''}</div><button type="button" class="danger-secondary" data-delete-holiday="${h.id}">EXCLUIR</button></div>`).join('');
+  list.innerHTML=companyHolidays.slice().sort((a,b)=>a.data.localeCompare(b.data)).map(h=>`<div class="holiday-row"><div><strong>${formatDateBR(h.data)} — ${escapeHtml(h.nome||'Feriado')}</strong><small>${h.horario_inicio&&h.horario_fim?`Funcionamento: ${String(h.horario_inicio).slice(0,5)} às ${String(h.horario_fim).slice(0,5)}`:'Horário especial não definido'}</small>${h.observacao?`<small>${escapeHtml(h.observacao)}</small>`:''}</div><div class="holiday-row-actions"><button type="button" class="secondary" data-edit-holiday="${h.id}">EDITAR</button><button type="button" class="danger-secondary" data-delete-holiday="${h.id}">EXCLUIR</button></div></div>`).join('');
   list.querySelectorAll('[data-delete-holiday]').forEach(b=>b.addEventListener('click',()=>deleteCompanyHoliday(b.dataset.deleteHoliday)));
+  list.querySelectorAll('[data-edit-holiday]').forEach(b=>b.addEventListener('click',()=>editCompanyHoliday(b.dataset.editHoliday)));
 }
+function editCompanyHoliday(id){
+  const h=companyHolidays.find(x=>String(x.id)===String(id)); if(!h)return;
+  $('holidayDate').value=h.data||''; $('holidayName').value=h.nome||'';
+  $('holidayStart').value=String(h.horario_inicio||'').slice(0,5); $('holidayEnd').value=String(h.horario_fim||'').slice(0,5);
+  $('holidayNote').value=h.observacao||'';
+  const btn=$('holidaySave'); if(btn){btn.textContent='ATUALIZAR FERIADO';btn.dataset.editing='true';btn.dataset.editingId=String(h.id);}
+  $('holidayDate')?.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function resetHolidayForm(){
+  ['holidayName','holidayStart','holidayEnd','holidayNote'].forEach(id=>{if($(id))$(id).value='';});
+  const btn=$('holidaySave');if(btn){btn.textContent='SALVAR FERIADO';delete btn.dataset.editing;delete btn.dataset.editingId;}
+}
+
 async function saveCompanyHoliday(){
   if(!db)return toast('Supabase não conectado.');
   if(!holidayTableReady)return toast('Aplique uma única vez feriados_empresa_v19.sql no Supabase para ativar o calendário.');
@@ -1312,7 +1326,7 @@ async function saveCompanyHoliday(){
   if((inicio&&!fim)||(!inicio&&fim))return toast('Preencha os dois horários ou deixe ambos vazios.');
   if(inicio&&fim&&fim<=inicio)return toast('O horário final precisa ser posterior ao inicial.');
   const payload={data,nome,horario_inicio:inicio,horario_fim:fim,observacao:$('holidayNote')?.value.trim()||null,updated_at:new Date().toISOString()};
-  try{const r=await db.from('feriados_empresa').upsert(payload,{onConflict:'data'}).select().single();if(r.error)throw r.error;const i=companyHolidays.findIndex(h=>h.data===data);if(i>=0)companyHolidays[i]=r.data;else companyHolidays.push(r.data);$('holidayName').value='';$('holidayStart').value='';$('holidayEnd').value='';$('holidayNote').value='';renderHolidayCalendar();renderEmployees();toast('Feriado salvo no calendário geral.');}
+  try{const editingId=$('holidaySave')?.dataset.editingId;const r=editingId?await db.from('feriados_empresa').update(payload).eq('id',editingId).select().single():await db.from('feriados_empresa').upsert(payload,{onConflict:'data'}).select().single();if(r.error)throw r.error;if(editingId)companyHolidays=companyHolidays.filter(h=>String(h.id)!==String(editingId));const i=companyHolidays.findIndex(h=>h.data===data);if(i>=0)companyHolidays[i]=r.data;else companyHolidays.push(r.data);resetHolidayForm();renderHolidayCalendar();renderEmployees();toast('Feriado salvo no calendário geral.');}
   catch(e){console.error(e);toast('Não foi possível salvar. Confira a migração feriados_empresa_v19.sql no Supabase.');}
 }
 async function deleteCompanyHoliday(id){
@@ -1323,6 +1337,7 @@ async function deleteCompanyHoliday(id){
 
 function setupEmployeeUI(){
   $("holidaySave")?.addEventListener("click",saveCompanyHoliday);
+  $("holidayCalendarToggle")?.addEventListener("click",()=>{const body=$("holidayCalendarBody"),btn=$("holidayCalendarToggle"),open=body?.classList.toggle("collapsed")===false;if(btn)btn.setAttribute("aria-expanded",String(open));if($("holidayToggleIcon"))$("holidayToggleIcon").textContent=open?"−":"＋";});
   $("menuBtn")?.addEventListener("click",openMenu);
   $("menuClose")?.addEventListener("click",closeMenu);
   $("menuOverlay")?.addEventListener("click",e=>{if(e.target.id==="menuOverlay")closeMenu();});
