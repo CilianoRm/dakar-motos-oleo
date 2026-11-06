@@ -1,4 +1,4 @@
-# Dakar Motos — Controle de Óleo, Funcionários e Ponto — V19.1
+# Dakar Motos — Controle de Óleo, Funcionários e Ponto — V19.3
 
 Novidades desta versão:
 - Cadastro do tipo de jornada: PERÍODO INTEGRAL (44h/semana) ou MEIO PERÍODO (22h/semana).
@@ -20,7 +20,9 @@ Para uma base existente, execute uma única vez `employee_jornada_v16.sql` no SQ
 - Na aba Funcionários, use **IMPORTAR PONTO** e selecione o arquivo `.xls` ou `.xlsx` exportado pelo relógio.
 - O importador lê as abas `1,2,3` e `4,5,6`, identifica datas, nomes e os quatro horários: entrada, saída para almoço, retorno e saída.
 - Apresenta uma prévia antes de gravar os registros.
-- Campos vazios no relatório não apagam os horários já existentes; registros são atualizados por funcionário/data, sem criar duplicatas.
+- A segunda batida do dia, quando existe somente uma entrada e uma saída, é interpretada como **SAÍDA**, mesmo que o Knup a classifique como “SAÍDA ALMOÇO”.
+- O relatório importado passa a ser a fonte de verdade: substitui os horários já lançados para aquele funcionário/data e limpa campos que estejam vazios no arquivo.
+- Registros são atualizados por funcionário/data, sem criar duplicatas.
 - Funcionários que não forem reconhecidos são sinalizados na prévia. Cadastre-os na tela **GERENCIAR** antes de importar.
 - Não exige SQL novo. A leitura de Excel usa a biblioteca SheetJS incluída por CDN.
 - Faça upload do ZIP completo para o GitHub Pages. Se a página antiga ficar em cache, faça recarga forçada (Ctrl+F5).
@@ -44,3 +46,9 @@ Para uma base existente, execute uma única vez `employee_jornada_v16.sql` no SQ
 - O calendário geral de feriados agora inicia minimizado e abre/fecha pelo cabeçalho.
 - Cada feriado cadastrado pode ser editado, inclusive data, nome, horário de abertura/fechamento e observação.
 - A edição atualiza o registro existente, inclusive quando a data é alterada.
+
+
+## V19.3 — Correção de importação Knup
+- Ao importar novamente um dia já lançado, os horários são substituídos exatamente pelos horários do arquivo Knup.
+- Se o dia tiver somente duas batidas (uma entrada e uma saída), a segunda batida fica no campo **SAÍDA**, não em **SAÍDA ALMOÇO**.
+- Não exige SQL novo.

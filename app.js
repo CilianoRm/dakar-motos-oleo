@@ -1268,7 +1268,7 @@ async function handleKnupFile(file){
     if(!result.records.length){$('knupImportPreview').innerHTML='<p class="knup-import-warn">Nenhum registro de horário foi reconhecido. Confirme se o arquivo contém as abas “1,2,3” e “4,5,6” e se os nomes já existem no cadastro.</p>';return;}
     const rows=result.records.slice(0,120).map(r=>`<tr><td>${formatDateBR(r.date)}</td><td>${escapeHtml(r.employee.nome)}</td><td>${r.chegada||'—'}</td><td>${r.saida_almoco||'—'}</td><td>${r.retorno_almoco||'—'}</td><td>${r.saida||'—'}</td></tr>`).join('');
     const unmatched=result.unmatched.length?`<p class="knup-import-warn">Não reconhecidos: ${[...new Set(result.unmatched.map(x=>x.name))].map(escapeHtml).join(', ')}. Cadastre esses nomes ou ajuste a identificação antes de importar.</p>`:'';
-    $('knupImportPreview').innerHTML=`<p class="modal-help">Prévia dos primeiros ${Math.min(result.records.length,120)} registros. Campos vazios no relatório não apagam horários já salvos.</p><table class="knup-preview-table"><thead><tr><th>DATA</th><th>FUNCIONÁRIO</th><th>ENTRADA</th><th>SAÍDA ALMOÇO</th><th>RETORNO</th><th>SAÍDA</th></tr></thead><tbody>${rows}</tbody></table>${unmatched}`;
+    $('knupImportPreview').innerHTML=`<p class="modal-help">Prévia dos primeiros ${Math.min(result.records.length,120)} registros. A importação substitui os horários já salvos pela informação exata do relatório; campos vazios serão limpos.</p><table class="knup-preview-table"><thead><tr><th>DATA</th><th>FUNCIONÁRIO</th><th>ENTRADA</th><th>SAÍDA ALMOÇO</th><th>RETORNO</th><th>SAÍDA</th></tr></thead><tbody>${rows}</tbody></table>${unmatched}`;
     $('knupImportSave').disabled=result.records.length===0;
   }catch(err){console.error('Importação Knup:',err);$('knupImportStatus').textContent=`Erro ao ler arquivo: ${err.message||err}`;}
 }
@@ -1282,7 +1282,10 @@ async function importKnupRecords(){
         const existing=employeePoints.find(p=>String(p.funcionario_id)===String(rec.employee.id)&&p.data===rec.date)||{};
         const makeDateTime=time=>time?`${rec.date}T${time}:00-03:00`:null;
         const payload={funcionario_id:rec.employee.id,data:rec.date,tipo_dia:existing.tipo_dia||effectiveDayType(rec.employee.id,rec.date),updated_at:localDateTime()};
-        for(const field of ['chegada','saida_almoco','retorno_almoco','saida'])payload[field]=rec[field]?makeDateTime(rec[field]):(existing[field]||null);
+        // A importação do Knup é a fonte de verdade para os horários do dia:
+        // substitui também horários já lançados manualmente e limpa campos
+        // que não existem no relatório importado.
+        for(const field of ['chegada','saida_almoco','retorno_almoco','saida'])payload[field]=rec[field]?makeDateTime(rec[field]):null;
         normalizeKnupPayload(payload);
         const {error}=await db.from('pontos_funcionarios').upsert(payload,{onConflict:'funcionario_id,data'});
         if(error)throw error;saved++;
