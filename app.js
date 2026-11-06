@@ -1020,14 +1020,23 @@ async function saveAttendanceManual() {
   // Os horários digitados são horários locais da loja (Brasil/Fortaleza).
   // O -03:00 evita que o Supabase/browser interprete 07:28 como UTC e mostre 04:28.
   const makeDateTime = (time) => time ? `${date}T${time}:00-03:00` : null;
+  // O banco aceita apenas os tipos definidos na constraint SQL.
+  // A agenda visual usa 'folga' e 'ferias', mas ambos são gravados como 'folga_ferias'.
+  // 'feriado' sem batida não é um tipo de ponto; no registro de presença fica como trabalho.
+  const tipoBanco = (tipo === 'folga' || tipo === 'ferias' || tipo === 'folga_ferias')
+    ? 'folga_ferias'
+    : (tipo === 'nao_veio' ? 'nao_veio'
+      : (tipo === 'feriado_trabalhado' ? 'feriado_trabalhado' : 'trabalho'));
   const payload = {
     funcionario_id: employee.id,
     data: date,
     chegada: makeDateTime(arrival),
-    saida_almoco: hasLunch && lunchOut ? makeDateTime(lunchOut) : null,
-    retorno_almoco: hasLunch && lunchIn ? makeDateTime(lunchIn) : null,
+    // Sem horário de almoço, os campos de almoço ficam nulos e a última batida
+    // é gravada diretamente como SAÍDA, inclusive em jornadas de meio período.
+    saida_almoco: (lunchOut && hasLunch) ? makeDateTime(lunchOut) : null,
+    retorno_almoco: (lunchIn && hasLunch) ? makeDateTime(lunchIn) : null,
     saida: makeDateTime(departure),
-    tipo_dia: tipo,
+    tipo_dia: tipoBanco,
     updated_at: localDateTime()
   };
   // Para folga/férias ou ausência, não carregamos horários antigos sem querer.

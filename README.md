@@ -52,3 +52,9 @@ Para uma base existente, execute uma única vez `employee_jornada_v16.sql` no SQ
 - Ao importar novamente um dia já lançado, os horários são substituídos exatamente pelos horários do arquivo Knup.
 - Se o dia tiver somente duas batidas (uma entrada e uma saída), a segunda batida fica no campo **SAÍDA**, não em **SAÍDA ALMOÇO**.
 - Não exige SQL novo.
+
+
+## V19.4 — correção de lançamento manual
+- Corrigida a conversão dos tipos de dia para os valores aceitos pela constraint `pontos_funcionarios_tipo_dia_check` do Supabase (`folga`/`ferias` são gravados como `folga_ferias`).
+- Em dias sem almoço, as batidas de almoço ficam vazias e o horário final é gravado diretamente em `saida`, inclusive para meio período.
+- Não requer SQL novo; substitua os arquivos no GitHub e atualize com Ctrl+F5.
