@@ -58,3 +58,14 @@ Para uma base existente, execute uma única vez `employee_jornada_v16.sql` no SQ
 - Corrigida a conversão dos tipos de dia para os valores aceitos pela constraint `pontos_funcionarios_tipo_dia_check` do Supabase (`folga`/`ferias` são gravados como `folga_ferias`).
 - Em dias sem almoço, as batidas de almoço ficam vazias e o horário final é gravado diretamente em `saida`, inclusive para meio período.
 - Não requer SQL novo; substitua os arquivos no GitHub e atualize com Ctrl+F5.
+
+
+## V20 — Gerenciamento dinâmico dos mecânicos da troca de óleo
+- O cartão **STATUS DOS MECÂNICOS** agora possui **GERENCIAR MECÂNICOS**.
+- É possível adicionar novos nomes e retirá-los da sequência diretamente pelo site.
+- Mecânicos novos entram com zero trocas e participam da prioridade automática por menor quantidade de trocas.
+- Ao retirar um mecânico, ele fica inativo na sequência, mas seu registro, contador e histórico são preservados.
+- A agenda de ausência dos mecânicos acompanha automaticamente a lista ativa.
+- Os dados são compartilhados entre os computadores pelo Supabase e atualizados em tempo real.
+- **Configuração inicial obrigatória:** execute uma única vez `mecanicos_oleo_v20.sql` no SQL Editor do Supabase. A migração importa os cinco mecânicos atuais e seus contadores/disponibilidades, sem apagar o histórico.
+- Depois, publique o ZIP completo e atualize o navegador com Ctrl+F5.

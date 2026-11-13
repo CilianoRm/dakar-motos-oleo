@@ -1,6 +1,5 @@
-const MECHANICS = ["GIL", "AMAURI", "SAMUEL", "TIAGUINHO", "TIAGO"];
-const COUNT_COL = { GIL:"gil_count", AMAURI:"amauri_count", SAMUEL:"samuel_count", TIAGUINHO:"tiaguinho_count", TIAGO:"tiago_count" };
-const AVAIL_COL = { GIL:"gil_available", AMAURI:"amauri_available", SAMUEL:"samuel_available", TIAGUINHO:"tiaguinho_available", TIAGO:"tiago_available" };
+let MECHANICS = ["GIL", "AMAURI", "SAMUEL", "TIAGUINHO", "TIAGO"];
+let mechanicRows = [];
 
 // IMPORTANTE: use somente a URL base do projeto, sem /rest/v1.
 const SUPABASE_URL = "https://faujgnzagnktsmxbnmmx.supabase.co";
@@ -39,7 +38,7 @@ function priorityIndex() {
 }
 
 function render() {
-  const cur = MECHANICS[state.current] || MECHANICS[0];
+  const cur = MECHANICS[state.current] || MECHANICS[0] || "—";
 
   if ($("currentName")) $("currentName").textContent = cur;
   if ($("tvName")) $("tvName").textContent = cur;
@@ -97,22 +96,15 @@ async function load({ silent = false } = {}) {
     const control = await db.from("controle").select("*").eq("id", 1).maybeSingle();
     if (control.error) throw control.error;
 
-    if (control.data) {
-      state.counts = {
-        GIL: Number(control.data.gil_count || 0),
-        AMAURI: Number(control.data.amauri_count || 0),
-        SAMUEL: Number(control.data.samuel_count || 0),
-        TIAGUINHO: Number(control.data.tiaguinho_count || 0),
-        TIAGO: Number(control.data.tiago_count || 0)
-      };
-      state.available = {
-        GIL: control.data.gil_available !== false,
-        AMAURI: control.data.amauri_available !== false,
-        SAMUEL: control.data.samuel_available !== false,
-        TIAGUINHO: control.data.tiaguinho_available !== false,
-        TIAGO: control.data.tiago_available !== false
-      };
-      const stored = Number(control.data.current_index);
+    const mechanicsResult = await db.from("mecanicos_oleo").select("*").eq("ativo", true).order("ordem", {ascending:true});
+    if (mechanicsResult.error) throw mechanicsResult.error;
+    mechanicRows = mechanicsResult.data || [];
+    MECHANICS = mechanicRows.map(row => row.nome);
+    state.counts = Object.fromEntries(mechanicRows.map(row => [row.nome, Number(row.contador || 0)]));
+    state.available = Object.fromEntries(mechanicRows.map(row => [row.nome, row.disponivel !== false]));
+    if (!MECHANICS.length) { state.current = 0; }
+    else {
+      const stored = Number(control.data?.current_index);
       state.current = Number.isInteger(stored) && stored >= 0 && stored < MECHANICS.length ? stored : priorityIndex();
     }
 
@@ -157,10 +149,9 @@ async function actOil() {
   try {
     const counts = { ...state.counts, [mechanic]:Number(state.counts[mechanic] || 0) + 1 };
     const next = priorityIndexWithCounts(counts, state.available);
-    await saveControl({
-      [COUNT_COL[mechanic]]: counts[mechanic],
-      current_index: next
-    });
+    const updated = await db.from("mecanicos_oleo").update({contador:counts[mechanic], updated_at:new Date().toISOString()}).eq("nome", mechanic);
+    if (updated.error) throw updated.error;
+    await saveControl({ current_index: next });
     await insertHistory(mechanic, "TROCOU ÓLEO", 1);
     state.counts = counts;
     state.current = next;
@@ -209,7 +200,9 @@ async function correctMinusOne(mechanic) {
   const next = priorityIndexWithCounts(counts, state.available);
 
   try {
-    await saveControl({ [COUNT_COL[mechanic]]:newCount, current_index:next });
+    const updated = await db.from("mecanicos_oleo").update({contador:newCount, updated_at:new Date().toISOString()}).eq("nome", mechanic);
+    if (updated.error) throw updated.error;
+    await saveControl({ current_index:next });
     await insertHistory(mechanic, "CORREÇÃO -1", -1);
     state.counts = counts;
     state.current = next;
@@ -228,7 +221,9 @@ async function toggleAvailability(name) {
     const available = { ...state.available, [name]:next };
     let current = state.current;
     if (!available[MECHANICS[current]]) current = priorityIndexWithCounts(state.counts, available);
-    await saveControl({ [AVAIL_COL[name]]:next, current_index:current });
+    const updated = await db.from("mecanicos_oleo").update({disponivel:next, updated_at:new Date().toISOString()}).eq("nome", name);
+    if (updated.error) throw updated.error;
+    await saveControl({ current_index:current });
     await insertHistory(name, next ? "LIBERADO" : "OCUPADO", 0);
     state.available = available;
     state.current = current;
@@ -259,11 +254,13 @@ async function clearData() {
   if (!db) return toast("Supabase não conectado.");
   if (!confirm("Zerar todos os contadores e histórico?")) return;
   try {
-    await saveControl({ current_index:0, gil_count:0, amauri_count:0, samuel_count:0, tiaguinho_count:0, tiago_count:0 });
+    const reset = await db.from("mecanicos_oleo").update({contador:0, updated_at:new Date().toISOString()}).eq("ativo", true);
+    if (reset.error) throw reset.error;
+    await saveControl({ current_index:0 });
     const result = await db.from("historico").delete().neq("id", 0);
     if (result.error) throw result.error;
     state.current = 0;
-    state.counts = { GIL:0, AMAURI:0, SAMUEL:0, TIAGUINHO:0, TIAGO:0 };
+    state.counts = Object.fromEntries(MECHANICS.map(name => [name,0]));
     state.history = [];
     render();
     toast("Dados zerados");
@@ -278,6 +275,7 @@ function subscribe() {
   if (channel) db.removeChannel(channel);
   channel = db.channel("dakar-motos-oleo-v8")
     .on("postgres_changes", { event:"*", schema:"public", table:"controle" }, () => load({ silent:true }))
+    .on("postgres_changes", { event:"*", schema:"public", table:"mecanicos_oleo" }, () => { load({ silent:true }); loadMechanicsAgenda({silent:true}); if($("mechanicManagerModal") && !$("mechanicManagerModal").classList.contains("hidden")) renderMechanicManager(); })
     .on("postgres_changes", { event:"*", schema:"public", table:"historico" }, () => load({ silent:true }))
     .on("postgres_changes", { event:"*", schema:"public", table:"funcionarios" }, () => loadEmployees({silent:true}))
     .on("postgres_changes", { event:"*", schema:"public", table:"pontos_funcionarios" }, () => loadEmployees({silent:true}))
@@ -341,6 +339,11 @@ function setupUI() {
   $("correctionModal")?.addEventListener("click", e => { if (e.target.id === "correctionModal") closeCorrectionModal(); });
   $("resetTurn")?.addEventListener("click", resetTurn);
   $("clearData")?.addEventListener("click", clearData);
+  $("manageMechanicsBtn")?.addEventListener("click", openMechanicManager);
+  $("mechanicManagerClose")?.addEventListener("click", closeMechanicManager);
+  $("mechanicManagerCancel")?.addEventListener("click", closeMechanicManager);
+  $("mechanicManagerAdd")?.addEventListener("click", addMechanic);
+  $("newMechanicName")?.addEventListener("keydown", e=>{if(e.key==='Enter')addMechanic();});
   $("openPanel")?.addEventListener("click", openPanel);
   $("copyPanel")?.addEventListener("click", copyPanel);
 }
@@ -821,13 +824,13 @@ function renderAgendaControls(employee){
   $("saveCreditsAndDebt")?.addEventListener('click',async()=>{const val=Math.max(0,Number($("creditDaysScreen").value||0)),debtVal=Math.max(0,Number($("debtDaysScreen").value||0));try{const r=await db.from('funcionarios').update({dias_folga_ferias:val,dias_devidos:debtVal,updated_at:new Date().toISOString()}).eq('id',employee.id);if(r.error)throw r.error;employee.dias_folga_ferias=val;employee.dias_devidos=debtVal;renderEmployees();toast('Saldos de dias atualizados.');}catch(e){console.error(e);toast('Erro ao salvar saldos. Execute o SQL da V11 no Supabase.');}});
 }
 
-const MECHANIC_CALENDAR_NAMES = ["AMAURI","SAMUEL","GIL","TIAGO","TIAGUINHO"];
+
 function mechanicAgendaFor(name,date=selectedMechanicDate){ return mechanicAgendaRows.find(r=>r.mecanico===name&&r.data===date)||null; }
-async function loadMechanicsAgenda({silent=false}={}){ if(!db)return; try{const r=await db.from('agenda_mecanicos').select('*').order('data',{ascending:true}); if(r.error)throw r.error; mechanicAgendaRows=r.data||[]; if(!$('mechanicsView')?.classList.contains('hidden'))renderMechanics();}catch(e){console.error('Mecânicos — erro ao carregar:',e);if(!silent)toast('Não foi possível carregar a agenda dos mecânicos. Execute mechanics_agenda_v12.sql no Supabase.');} }
+async function loadMechanicsAgenda({silent=false}={}){ if(!db)return; try{const r=await db.from('agenda_mecanicos').select('*').order('data',{ascending:true}); if(r.error)throw r.error; mechanicAgendaRows=r.data||[]; if(!MECHANICS.includes(selectedMechanicName)) selectedMechanicName=MECHANICS[0]||''; if(!$('mechanicsView')?.classList.contains('hidden'))renderMechanics();}catch(e){console.error('Mecânicos — erro ao carregar:',e);if(!silent)toast('Não foi possível carregar a agenda dos mecânicos. Execute mechanics_agenda_v12.sql no Supabase.');} }
 function renderMechanicCalendar(name){const host=$('mechanicCalendar');if(!host)return;const y=mechanicCalendarMonth.getFullYear(),m=mechanicCalendarMonth.getMonth(),first=new Date(y,m,1),start=(first.getDay()+6)%7,daysIn=new Date(y,m+1,0).getDate(),cells=[];for(let i=0;i<start;i++)cells.push('<div class="calendar-day empty"></div>');for(let day=1;day<=daysIn;day++){const date=`${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`,a=mechanicAgendaFor(name,date),badge=a?.nao_veio?'<span class="calendar-badge absence">NÃO VEM</span>':'';cells.push(`<button type="button" class="calendar-day ${date===selectedMechanicDate?'selected':''} ${date===localDateISO()?'today':''}" data-mech-date="${date}"><b>${day}</b>${badge}</button>`);}host.innerHTML=`<div class="calendar-head"><button class="icon-btn" id="mechCalPrev">‹</button><strong>${calendarTitle(mechanicCalendarMonth)}</strong><button class="icon-btn" id="mechCalNext">›</button></div><div class="calendar-week"><span>SEG</span><span>TER</span><span>QUA</span><span>QUI</span><span>SEX</span><span>SÁB</span><span>DOM</span></div><div class="calendar-grid">${cells.join('')}</div>`;host.querySelectorAll('.calendar-day:not(.empty)').forEach(btn=>btn.addEventListener('click',()=>{selectedMechanicDate=btn.dataset.mechDate;renderMechanics();}));$('mechCalPrev')?.addEventListener('click',()=>{mechanicCalendarMonth.setMonth(mechanicCalendarMonth.getMonth()-1);renderMechanicCalendar(name);});$('mechCalNext')?.addEventListener('click',()=>{mechanicCalendarMonth.setMonth(mechanicCalendarMonth.getMonth()+1);renderMechanicCalendar(name);});}
 async function setMechanicAbsence(name,date){if(!db)return toast('Supabase não conectado.');try{const existing=mechanicAgendaFor(name,date);if(existing?.nao_veio)return toast(`${name} já está marcado como NÃO VEM em ${formatDateBR(date)}.`);const r=await db.from('agenda_mecanicos').upsert({mecanico:name,data:date,nao_veio:true,updated_at:new Date().toISOString()},{onConflict:'mecanico,data'}).select().single();if(r.error)throw r.error;const i=mechanicAgendaRows.findIndex(x=>x.mecanico===name&&x.data===date);if(i>=0)mechanicAgendaRows[i]=r.data;else mechanicAgendaRows.push(r.data);renderMechanics();toast(`${name}: NÃO VEM em ${formatDateBR(date)}.`);}catch(e){console.error(e);toast('Erro ao salvar a ausência: '+(e?.message||'verifique o Supabase.'));}}
 async function clearMechanicAbsence(name,date){if(!db)return toast('Supabase não conectado.');try{const r=await db.from('agenda_mecanicos').delete().eq('mecanico',name).eq('data',date);if(r.error)throw r.error;mechanicAgendaRows=mechanicAgendaRows.filter(x=>!(x.mecanico===name&&x.data===date));renderMechanics();toast(`Ausência de ${name} removida de ${formatDateBR(date)}.`);}catch(e){console.error(e);toast('Erro ao limpar a ausência.');}}
-function renderMechanics(){const list=$('mechanicList'),detail=$('mechanicDetail');if(!list||!detail)return;if($('mechanicDate'))$('mechanicDate').textContent=new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'});list.innerHTML=MECHANIC_CALENDAR_NAMES.map(name=>{const total=mechanicAgendaRows.filter(x=>x.mecanico===name&&x.nao_veio).length;return `<button class="employee-list-item ${name===selectedMechanicName?'active':''}" type="button" data-mech-name="${name}"><span>${name}</span><small>${total} ${total===1?'ausência':'ausências'}</small></button>`;}).join('');list.querySelectorAll('[data-mech-name]').forEach(b=>b.addEventListener('click',()=>{selectedMechanicName=b.dataset.mechName;mechanicCalendarMonth=new Date();selectedMechanicDate=localDateISO();renderMechanics();}));const name=selectedMechanicName,a=mechanicAgendaFor(name,selectedMechanicDate);detail.innerHTML=`<div class="employee-detail-head"><div><span class="employee-tag">MECÂNICO</span><h1>${name}</h1></div><div class="employee-head-actions"><button class="secondary" id="mechanicMarkAbsence">NÃO VEM NESTE DIA</button></div></div><div class="schedule-summary mechanic-summary"><div><b>DIA SELECIONADO</b><span>${formatDateBR(selectedMechanicDate)}</span></div><div><b>SITUAÇÃO</b><span>${a?.nao_veio?'NÃO VEM':'DISPONÍVEL / SEM MARCAÇÃO'}</span></div><div><b>OBJETIVO</b><span>Somente agenda de ausência</span></div></div><div class="agenda-card mechanic-agenda-card"><div class="agenda-card-title">AGENDA DO MECÂNICO</div><div id="mechanicCalendar" class="employee-calendar"></div><div class="agenda-buttons mechanic-agenda-buttons"><button class="secondary" id="mechanicMarkAbsence2">NÃO VEM</button>${a?'<button class="danger-secondary" id="mechanicClearAbsence">LIMPAR DIA</button>':''}</div><p class="agenda-help">Selecione qualquer data, inclusive futura ou passada, para anotar quando o mecânico avisar que não virá. Não há cálculo de carga horária.</p></div>`;renderMechanicCalendar(name);$('mechanicMarkAbsence')?.addEventListener('click',()=>setMechanicAbsence(name,selectedMechanicDate));$('mechanicMarkAbsence2')?.addEventListener('click',()=>setMechanicAbsence(name,selectedMechanicDate));$('mechanicClearAbsence')?.addEventListener('click',()=>clearMechanicAbsence(name,selectedMechanicDate));}
+function renderMechanics(){const list=$('mechanicList'),detail=$('mechanicDetail');if(!list||!detail)return;if($('mechanicDate'))$('mechanicDate').textContent=new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'});list.innerHTML=MECHANICS.map(name=>{const total=mechanicAgendaRows.filter(x=>x.mecanico===name&&x.nao_veio).length;return `<button class="employee-list-item ${name===selectedMechanicName?'active':''}" type="button" data-mech-name="${name}"><span>${name}</span><small>${total} ${total===1?'ausência':'ausências'}</small></button>`;}).join('');list.querySelectorAll('[data-mech-name]').forEach(b=>b.addEventListener('click',()=>{selectedMechanicName=b.dataset.mechName;mechanicCalendarMonth=new Date();selectedMechanicDate=localDateISO();renderMechanics();}));const name=selectedMechanicName,a=mechanicAgendaFor(name,selectedMechanicDate);if(!name){detail.innerHTML='<p>Cadastre um mecânico para visualizar a agenda.</p>';return;}detail.innerHTML=`<div class="employee-detail-head"><div><span class="employee-tag">MECÂNICO</span><h1>${name}</h1></div><div class="employee-head-actions"><button class="secondary" id="mechanicMarkAbsence">NÃO VEM NESTE DIA</button></div></div><div class="schedule-summary mechanic-summary"><div><b>DIA SELECIONADO</b><span>${formatDateBR(selectedMechanicDate)}</span></div><div><b>SITUAÇÃO</b><span>${a?.nao_veio?'NÃO VEM':'DISPONÍVEL / SEM MARCAÇÃO'}</span></div><div><b>OBJETIVO</b><span>Somente agenda de ausência</span></div></div><div class="agenda-card mechanic-agenda-card"><div class="agenda-card-title">AGENDA DO MECÂNICO</div><div id="mechanicCalendar" class="employee-calendar"></div><div class="agenda-buttons mechanic-agenda-buttons"><button class="secondary" id="mechanicMarkAbsence2">NÃO VEM</button>${a?'<button class="danger-secondary" id="mechanicClearAbsence">LIMPAR DIA</button>':''}</div><p class="agenda-help">Selecione qualquer data, inclusive futura ou passada, para anotar quando o mecânico avisar que não virá. Não há cálculo de carga horária.</p></div>`;renderMechanicCalendar(name);$('mechanicMarkAbsence')?.addEventListener('click',()=>setMechanicAbsence(name,selectedMechanicDate));$('mechanicMarkAbsence2')?.addEventListener('click',()=>setMechanicAbsence(name,selectedMechanicDate));$('mechanicClearAbsence')?.addEventListener('click',()=>clearMechanicAbsence(name,selectedMechanicDate));}
 
 function makeEmployeeId(name) {
   const base = String(name).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'FUNCIONARIO';
@@ -1117,6 +1120,12 @@ async function saveSchedule() {
 
 function openMenu(){ $("menuOverlay")?.classList.remove("hidden"); }
 function closeMenu(){ $("menuOverlay")?.classList.add("hidden"); }
+function openMechanicManager(){renderMechanicManager();$('mechanicManagerModal')?.classList.remove('hidden');$('newMechanicName')?.focus();}
+function closeMechanicManager(){$('mechanicManagerModal')?.classList.add('hidden');}
+function renderMechanicManager(){const host=$('mechanicManagerList');if(!host)return;host.innerHTML=mechanicRows.map(row=>`<div class="employee-manager-row"><strong>${escapeHtml(row.nome)}</strong><span>${Number(row.contador||0)} trocas</span><button class="danger-secondary" type="button" data-remove-mechanic="${escapeHtml(row.nome)}">RETIRAR</button></div>`).join('')||'<p>Nenhum mecânico cadastrado.</p>';host.querySelectorAll('[data-remove-mechanic]').forEach(btn=>btn.addEventListener('click',()=>removeMechanic(btn.dataset.removeMechanic)));}
+async function addMechanic(){const input=$('newMechanicName'),name=(input?.value||'').trim().replace(/\s+/g,' ').toUpperCase();if(!name)return toast('Informe o nome do mecânico.');if(MECHANICS.some(n=>n.toLowerCase()===name.toLowerCase()))return toast('Esse mecânico já está cadastrado.');try{const order=mechanicRows.reduce((m,r)=>Math.max(m,Number(r.ordem)||0),0)+1;const result=await db.from('mecanicos_oleo').insert({nome:name,ordem:order,ativo:true,contador:0,disponivel:true}).select().single();if(result.error)throw result.error;mechanicRows.push(result.data);MECHANICS=mechanicRows.map(r=>r.nome);state.counts[name]=0;state.available[name]=true;if(MECHANICS.length===1)state.current=0;input.value='';render();renderMechanicManager();if(!$('mechanicsView')?.classList.contains('hidden'))renderMechanics();toast(`${name} adicionado à sequência.`);}catch(e){console.error('Erro ao adicionar mecânico:',e);toast('Não foi possível adicionar. Verifique a migração SQL e o Supabase.');}}
+async function removeMechanic(name){if(!confirm(`Retirar ${name} da sequência? O histórico e as trocas anteriores serão preservados.`))return;try{const result=await db.from('mecanicos_oleo').update({ativo:false,updated_at:new Date().toISOString()}).eq('nome',name);if(result.error)throw result.error;mechanicRows=mechanicRows.filter(r=>r.nome!==name);MECHANICS=mechanicRows.map(r=>r.nome);delete state.counts[name];delete state.available[name];if(!MECHANICS.includes(selectedMechanicName))selectedMechanicName=MECHANICS[0]||'';state.current=MECHANICS.length?priorityIndex():0;await saveControl({current_index:state.current});render();renderMechanicManager();if(!$('mechanicsView')?.classList.contains('hidden'))renderMechanics();toast(`${name} retirado da sequência. Histórico preservado.`);}catch(e){console.error('Erro ao retirar mecânico:',e);toast('Não foi possível retirar o mecânico.');}}
+
 function openMechanicsView(){ $("menuOverlay")?.classList.add("hidden"); $("controlView")?.classList.add("hidden"); $("tvView")?.classList.add("hidden"); $("employeesView")?.classList.add("hidden"); $("mechanicsView")?.classList.remove("hidden"); mechanicCalendarMonth=new Date(); selectedMechanicDate=localDateISO(); renderMechanics(); loadMechanicsAgenda({silent:true}); }
 function closeMechanicsView(){ $("mechanicsView")?.classList.add("hidden"); $("controlView")?.classList.remove("hidden"); }
 
